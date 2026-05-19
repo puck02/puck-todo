@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Puck Todo</title>
+  <link rel="stylesheet" href="/style.css" />
+</head>
+<body>
+  <main class="shell">
+    <section class="hero">
+      <div>
+        <p class="eyebrow">Puck Todo</p>
+        <h1 id="dailyQuote"><span id="quoteText">一切都在流动。</span><span id="quoteAuthor">——赫拉克利特</span></h1>
+        <p class="subtitle">月度待办、截止提醒、低频重要事项提醒。轻量、温馨、只保留你真正需要的。</p>
+      </div>
+      <div class="month-card" aria-label="月份选择">
+        <button id="prevMonth" class="ghost-btn" title="上个月">‹</button>
+        <input id="monthPicker" type="month" />
+        <button id="nextMonth" class="ghost-btn" title="下个月">›</button>
+      </div>
+    </section>
+
+    <section class="panel composer">
+      <div class="panel-head">
+        <div>
+          <h2>新增待办</h2>
+          <p>写下事件、优先级和截止时间，我会帮你盯住它。</p>
+        </div>
+      </div>
+      <form id="todoForm" class="form-grid">
+        <label class="field title-field">
+          <span>事件名称</span>
+          <input id="titleInput" type="text" maxlength="120" placeholder="例如：准备美团外包面试问题" required />
+        </label>
+        <label class="field">
+          <span>优先级</span>
+          <select id="priorityInput">
+            <option value="low">低</option>
+            <option value="medium" selected>中</option>
+            <option value="high">高</option>
+            <option value="urgent">紧急</option>
+          </select>
+        </label>
+        <label class="field">
+          <span>截止时间</span>
+          <input id="dueInput" type="datetime-local" required />
+        </label>
+        <label class="field note-field">
+          <span>备注</span>
+          <textarea id="noteInput" rows="3" maxlength="2000" placeholder="可以记录链接、面试问题、资料地址等"></textarea>
+        </label>
+        <button class="primary-btn" type="submit">添加</button>
+      </form>
+    </section>
+
+    <section class="columns">
+      <section class="panel list-panel">
+        <div class="panel-head">
+          <div>
+            <h2>未完成</h2>
+            <p id="pendingMeta">Loading...</p>
+          </div>
+        </div>
+        <div id="pendingList" class="todo-list"></div>
+      </section>
+
+      <section class="panel list-panel completed-panel">
+        <div class="panel-head">
+          <div>
+            <h2>已完成</h2>
+            <p id="completedMeta">完成的事项会被温柔地收纳在这里。</p>
+          </div>
+        </div>
+        <div id="completedList" class="todo-list"></div>
+      </section>
+    </section>
+  </main>
+
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+  <script src="/app.js"></script>
+</body>
+</html>

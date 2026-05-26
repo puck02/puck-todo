@@ -78,6 +78,44 @@
   </main>
 
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
+  <div id="editModal" class="modal hidden" aria-hidden="true">
+    <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="editTitle">
+      <div class="panel-head modal-head">
+        <div>
+          <h2 id="editTitle">编辑待办</h2>
+          <p>修改名称、优先级、截止时间和备注，然后保存。</p>
+        </div>
+        <button id="closeEditModal" class="ghost-btn modal-close" type="button" aria-label="关闭编辑窗口">×</button>
+      </div>
+      <form id="editForm" class="form-grid edit-form">
+        <label class="field title-field">
+          <span>事件名称</span>
+          <input id="editTitleInput" type="text" maxlength="120" required />
+        </label>
+        <label class="field">
+          <span>优先级</span>
+          <select id="editPriorityInput">
+            <option value="low">低</option>
+            <option value="medium">中</option>
+            <option value="high">高</option>
+            <option value="urgent">紧急</option>
+          </select>
+        </label>
+        <label class="field">
+          <span>截止时间</span>
+          <input id="editDueInput" type="datetime-local" required />
+        </label>
+        <label class="field note-field">
+          <span>备注</span>
+          <textarea id="editNoteInput" rows="3" maxlength="2000"></textarea>
+        </label>
+        <div class="edit-actions">
+          <button id="cancelEdit" class="ghost-action" type="button">取消</button>
+          <button class="primary-btn" type="submit">保存修改</button>
+        </div>
+      </form>
+    </div>
+  </div>
   <script src="/app.js"></script>
 </body>
 </html>

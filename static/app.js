@@ -10,7 +10,16 @@ const completedList = $('completedList');
 const pendingMeta = $('pendingMeta');
 const completedMeta = $('completedMeta');
 const toastEl = $('toast');
+const editModal = $('editModal');
+const closeEditModal = $('closeEditModal');
+const cancelEdit = $('cancelEdit');
+const editForm = $('editForm');
+const editTitleInput = $('editTitleInput');
+const editPriorityInput = $('editPriorityInput');
+const editDueInput = $('editDueInput');
+const editNoteInput = $('editNoteInput');
 
+const editState = { currentId: null };
 
 const dailyQuotes = [
   { text: '一切都在流动。', author: '赫拉克利特' },
@@ -124,6 +133,24 @@ function renderNote(note) {
   return noteEl;
 }
 
+function openEditModal(item) {
+  editState.currentId = item.id;
+  editTitleInput.value = item.title || '';
+  editPriorityInput.value = item.priority || 'medium';
+  editDueInput.value = (item.due_at || '').slice(0, 16);
+  editNoteInput.value = item.note || '';
+  editModal.classList.remove('hidden');
+  editModal.setAttribute('aria-hidden', 'false');
+  editTitleInput.focus();
+}
+
+function closeEditModalFn() {
+  editState.currentId = null;
+  editForm.reset();
+  editModal.classList.add('hidden');
+  editModal.setAttribute('aria-hidden', 'true');
+}
+
 function renderList(container, items, completed = false) {
   container.innerHTML = '';
   if (!items.length) {
@@ -162,6 +189,10 @@ function renderList(container, items, completed = false) {
 
     const actions = document.createElement('div');
     actions.className = 'actions';
+    const edit = document.createElement('button');
+    edit.className = 'icon-btn';
+    edit.textContent = '编辑';
+    edit.addEventListener('click', () => openEditModal(item));
     const del = document.createElement('button');
     del.className = 'icon-btn danger';
     del.textContent = '删除';
@@ -171,7 +202,7 @@ function renderList(container, items, completed = false) {
       toast('已删除');
       await loadTodos();
     });
-    actions.append(del);
+    actions.append(edit, del);
 
     card.append(check, body, actions);
     container.appendChild(card);
@@ -214,6 +245,23 @@ $('todoForm').addEventListener('submit', async (e) => {
 monthPicker.addEventListener('change', () => loadTodos().catch(err => toast(err.message)));
 $('prevMonth').addEventListener('click', () => shiftMonth(-1));
 $('nextMonth').addEventListener('click', () => shiftMonth(1));
+closeEditModal.addEventListener('click', closeEditModalFn);
+cancelEdit.addEventListener('click', closeEditModalFn);
+editModal.addEventListener('click', (e) => { if (e.target === editModal) closeEditModalFn(); });
+editForm.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  if (!editState.currentId) return;
+  const payload = {
+    title: editTitleInput.value,
+    priority: editPriorityInput.value,
+    due_at: editDueInput.value,
+    note: editNoteInput.value
+  };
+  await request(`/api/todos/${editState.currentId}`, { method: 'PATCH', body: JSON.stringify(payload) });
+  toast('已保存修改~');
+  closeEditModalFn();
+  await loadTodos();
+});
 
 function initDueInput() {
   const d = new Date();

@@ -298,6 +298,55 @@ input:focus, select:focus, textarea:focus {
 .icon-btn:hover { color: var(--ink); background: #ededf2; }
 .icon-btn.danger:hover { color: #fff; background: var(--urgent); }
 
+.ghost-action {
+  height: 48px;
+  border: 1px solid var(--hairline);
+  border-radius: 999px;
+  padding: 0 18px;
+  background: rgba(255,255,255,0.86);
+  color: var(--ink);
+  font-weight: 650;
+  transition: background .18s ease, transform .18s ease, border-color .18s ease;
+}
+.ghost-action:hover { background: #fff; border-color: rgba(0,0,0,.12); transform: translateY(-1px); }
+
+.modal {
+  position: fixed;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+  background: rgba(29,29,31,.34);
+  backdrop-filter: blur(10px);
+  z-index: 50;
+}
+.modal.hidden { display: none; }
+.modal-card {
+  width: min(760px, 100%);
+  max-height: min(90vh, 860px);
+  overflow: auto;
+  padding: 24px;
+  border-radius: var(--radius);
+  background: var(--surface-solid);
+  box-shadow: 0 30px 80px rgba(0,0,0,.20);
+}
+.modal-head { margin-bottom: 14px; }
+.modal-close {
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  font-size: 28px;
+  line-height: 1;
+}
+.edit-form { grid-template-columns: 1fr 150px 230px 112px; }
+.edit-form .note-field { grid-column: 1 / 4; }
+.edit-actions {
+  grid-column: 1 / -1;
+  display: flex;
+  justify-content: flex-end;
+  gap: 12px;
+}
+
 .toast {
   position: fixed;
   left: 50%;
@@ -320,7 +369,11 @@ input:focus, select:focus, textarea:focus {
   .hero { grid-template-columns: 1fr; align-items: start; min-height: auto; }
   .month-card { width: fit-content; }
   .form-grid { grid-template-columns: 1fr; }
+  .edit-form { grid-template-columns: 1fr; }
   .note-field { grid-column: auto; }
+  .edit-form .note-field { grid-column: auto; }
+  .edit-actions { grid-column: auto; justify-content: stretch; }
+  .edit-actions .primary-btn, .edit-actions .ghost-action { width: 100%; }
   .columns { grid-template-columns: 1fr; }
   h1 { font-size: clamp(28px, 9vw, 42px); }
 }

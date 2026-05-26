@@ -48,6 +48,23 @@ class TodoCoreTests(unittest.TestCase):
         data_again = self.store.daily_reminders(now + timedelta(hours=1))
         self.assertEqual(data_again["future_important"], [])
 
+
+    def test_update_todo_allows_editing_core_fields(self):
+        todo = self.store.create_todo("原始标题", "medium", "2026-05-12T09:30:00", note="原始备注")
+
+        updated = self.store.update_todo(todo["id"], {
+            "title": "编辑后的标题",
+            "priority": "high",
+            "due_at": "2026-05-13T11:00:00",
+            "note": "编辑后的备注",
+        })
+
+        self.assertEqual(updated["title"], "编辑后的标题")
+        self.assertEqual(updated["priority"], "high")
+        self.assertEqual(updated["due_at"], "2026-05-13T11:00:00")
+        self.assertEqual(updated["note"], "编辑后的备注")
+        self.assertEqual(updated["status"], "pending")
+
     def test_due_soon_reminder_only_once_for_pending_items(self):
         now = datetime(2026, 5, 11, 14, 30)
         self.store.create_todo("30分钟后截止", "high", (now + timedelta(minutes=25)).isoformat())

@@ -6,5 +6,6 @@ venv/
 node_modules/
 .DS_Store
 *.log
+.superpowers/
 
 # keep SQLite data files tracked intentionally for personal backup

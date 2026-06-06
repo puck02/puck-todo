@@ -3,6 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="description" content="Puck Todo 是一个轻量个人月度待办工具。" />
   <title>Puck Todo</title>
   <link rel="stylesheet" href="/style.css" />
 </head>
@@ -12,12 +13,12 @@
       <div>
         <p class="eyebrow">Puck Todo</p>
         <h1 id="dailyQuote"><span id="quoteText">一切都在流动。</span><span id="quoteAuthor">——赫拉克利特</span></h1>
-        <p class="subtitle">月度待办、截止提醒、低频重要事项提醒。轻量、温馨、只保留你真正需要的。</p>
+        <p class="subtitle">一张安静的月度清单，记录需要完成和已经完成的事。</p>
       </div>
       <div class="month-card" aria-label="月份选择">
-        <button id="prevMonth" class="ghost-btn" title="上个月">‹</button>
+        <button id="prevMonth" class="ghost-btn" type="button" title="上个月">‹</button>
         <input id="monthPicker" type="month" />
-        <button id="nextMonth" class="ghost-btn" title="下个月">›</button>
+        <button id="nextMonth" class="ghost-btn" type="button" title="下个月">›</button>
       </div>
     </section>
 
@@ -25,7 +26,7 @@
       <div class="panel-head">
         <div>
           <h2>新增待办</h2>
-          <p>写下事件、优先级和截止时间，我会帮你盯住它。</p>
+          <p>写下事件、优先级和截止时间。</p>
         </div>
       </div>
       <form id="todoForm" class="form-grid">
@@ -69,7 +70,7 @@
         <div class="panel-head">
           <div>
             <h2>已完成</h2>
-            <p id="completedMeta">完成的事项会被温柔地收纳在这里。</p>
+            <p id="completedMeta">完成的事项会收纳在这里。</p>
           </div>
         </div>
         <div id="completedList" class="todo-list"></div>

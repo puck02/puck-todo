@@ -167,7 +167,9 @@ function renderList(container, items, completed = false) {
 
     const check = document.createElement('button');
     check.className = `check ${completed ? 'done' : ''}`;
+    check.type = 'button';
     check.title = completed ? '取消完成' : '标记完成';
+    check.setAttribute('aria-label', completed ? `取消完成：${item.title}` : `标记完成：${item.title}`);
     check.addEventListener('click', async () => {
       await request(`/api/todos/${item.id}/${completed ? 'uncomplete' : 'complete'}`, { method: 'POST' });
       toast(completed ? '已恢复到未完成~' : '完成啦，真棒！');
@@ -191,11 +193,17 @@ function renderList(container, items, completed = false) {
     actions.className = 'actions';
     const edit = document.createElement('button');
     edit.className = 'icon-btn';
+    edit.type = 'button';
     edit.textContent = '编辑';
+    edit.title = '编辑待办';
+    edit.setAttribute('aria-label', `编辑待办：${item.title}`);
     edit.addEventListener('click', () => openEditModal(item));
     const del = document.createElement('button');
     del.className = 'icon-btn danger';
+    del.type = 'button';
     del.textContent = '删除';
+    del.title = '删除待办';
+    del.setAttribute('aria-label', `删除待办：${item.title}`);
     del.addEventListener('click', async () => {
       if (!confirm(`删除「${item.title}」？`)) return;
       await request(`/api/todos/${item.id}`, { method: 'DELETE' });

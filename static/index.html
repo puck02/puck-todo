@@ -3,9 +3,9 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <meta name="description" content="Puck Todo 是一个轻量个人月度待办工具。" />
+  <meta name="description" content="Puck Office 是一个轻量个人办公站，整合月度待办和 Markdown 笔记。" />
   <meta name="theme-color" content="#f6f1e8" />
-  <title>Puck Todo</title>
+  <title>Puck Office</title>
   <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
   <link rel="stylesheet" href="/style.css" />
 </head>
@@ -13,9 +13,9 @@
   <main class="shell">
     <section class="hero">
       <div>
-        <p class="eyebrow">Puck Todo</p>
+        <p class="eyebrow">Puck Office</p>
         <h1 id="dailyQuote"><span id="quoteText">一切都在流动。</span><span id="quoteAuthor">——赫拉克利特</span></h1>
-        <p class="subtitle">一张安静的月度清单，记录需要完成和已经完成的事。</p>
+        <p class="subtitle">一处安静的个人办公站，记录本月待办和随手笔记。</p>
       </div>
       <div class="month-card" aria-label="月份选择">
         <button id="prevMonth" class="ghost-btn" type="button" title="上个月">‹</button>
@@ -24,40 +24,71 @@
       </div>
     </section>
 
-    <section class="panel composer">
-      <div class="panel-head">
-        <div>
-          <h2>新增待办</h2>
-          <p>写下事件、优先级和截止时间。</p>
+    <section class="workspace-grid">
+      <section class="panel composer">
+        <div class="panel-head">
+          <div>
+            <h2>新增待办</h2>
+            <p>写下事件、优先级和截止时间。</p>
+          </div>
         </div>
-      </div>
-      <form id="todoForm" class="form-grid">
-        <label class="field title-field">
-          <span>事件名称</span>
-          <input id="titleInput" type="text" maxlength="120" placeholder="例如：准备美团外包面试问题" required />
-        </label>
-        <label class="field">
-          <span>优先级</span>
-          <select id="priorityInput">
-            <option value="low">低</option>
-            <option value="medium" selected>中</option>
-            <option value="high">高</option>
-            <option value="urgent">紧急</option>
-          </select>
-        </label>
-        <label class="field">
-          <span>截止时间</span>
-          <input id="dueInput" type="datetime-local" required />
-        </label>
-        <label class="field note-field">
-          <span>备注</span>
-          <textarea id="noteInput" rows="3" maxlength="2000" placeholder="可以记录链接、面试问题、资料地址等"></textarea>
-        </label>
-        <button class="primary-btn" type="submit">添加</button>
-      </form>
+        <form id="todoForm" class="form-grid">
+          <label class="field title-field">
+            <span>事件名称</span>
+            <input id="titleInput" type="text" maxlength="120" placeholder="例如：准备项目周报" required />
+          </label>
+          <label class="field">
+            <span>优先级</span>
+            <select id="priorityInput">
+              <option value="low">低</option>
+              <option value="medium" selected>中</option>
+              <option value="high">高</option>
+              <option value="urgent">紧急</option>
+            </select>
+          </label>
+          <label class="field">
+            <span>截止时间</span>
+            <input id="dueInput" type="datetime-local" required />
+          </label>
+          <label class="field note-field">
+            <span>备注</span>
+            <textarea id="noteInput" rows="3" maxlength="2000" placeholder="可以记录链接、资料地址等"></textarea>
+          </label>
+          <button class="primary-btn" type="submit">添加</button>
+        </form>
+      </section>
+
+      <section class="panel note-workbench">
+        <div class="panel-head">
+          <div>
+            <h2>添加笔记</h2>
+            <p>输入 Markdown，右侧实时渲染。</p>
+          </div>
+        </div>
+        <form id="noteForm" class="note-form">
+          <label class="field">
+            <span>标题</span>
+            <input id="noteTitleInput" type="text" maxlength="120" placeholder="例如：今日复盘" required />
+          </label>
+          <div class="note-editor">
+            <label class="field">
+              <span>Markdown</span>
+              <textarea id="noteMarkdownInput" rows="10" maxlength="20000" placeholder="# 标题&#10;&#10;- [ ] 待办&#10;- **重点**"></textarea>
+            </label>
+            <div class="preview-wrap">
+              <span>预览</span>
+              <div id="notePreview" class="markdown-preview empty-preview">开始输入后显示预览。</div>
+            </div>
+          </div>
+          <div class="note-actions">
+            <button id="cancelNoteEdit" class="ghost-action hidden" type="button">取消编辑</button>
+            <button id="saveNoteButton" class="primary-btn" type="submit">保存笔记</button>
+          </div>
+        </form>
+      </section>
     </section>
 
-    <section class="columns">
+    <section class="columns office-columns">
       <section class="panel list-panel">
         <div class="panel-head">
           <div>
@@ -76,6 +107,16 @@
           </div>
         </div>
         <div id="completedList" class="todo-list"></div>
+      </section>
+
+      <section class="panel list-panel notes-panel">
+        <div class="panel-head">
+          <div>
+            <h2>笔记</h2>
+            <p id="notesMeta">随手记录会收纳在这里。</p>
+          </div>
+        </div>
+        <div id="notesList" class="notes-list"></div>
       </section>
     </section>
   </main>
@@ -119,6 +160,6 @@
       </form>
     </div>
   </div>
-  <script src="/app.js"></script>
+  <script type="module" src="/app.js"></script>
 </body>
 </html>

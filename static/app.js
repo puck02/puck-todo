@@ -1,6 +1,9 @@
+import { renderMarkdown } from '/markdown.js';
+
 const state = {
   month: '',
-  data: { pending: [], completed: [] }
+  data: { pending: [], completed: [] },
+  notes: []
 };
 
 const $ = (id) => document.getElementById(id);
@@ -9,6 +12,8 @@ const pendingList = $('pendingList');
 const completedList = $('completedList');
 const pendingMeta = $('pendingMeta');
 const completedMeta = $('completedMeta');
+const notesList = $('notesList');
+const notesMeta = $('notesMeta');
 const toastEl = $('toast');
 const editModal = $('editModal');
 const closeEditModal = $('closeEditModal');
@@ -18,8 +23,15 @@ const editTitleInput = $('editTitleInput');
 const editPriorityInput = $('editPriorityInput');
 const editDueInput = $('editDueInput');
 const editNoteInput = $('editNoteInput');
+const noteForm = $('noteForm');
+const noteTitleInput = $('noteTitleInput');
+const noteMarkdownInput = $('noteMarkdownInput');
+const notePreview = $('notePreview');
+const saveNoteButton = $('saveNoteButton');
+const cancelNoteEdit = $('cancelNoteEdit');
 
 const editState = { currentId: null };
+const noteState = { currentId: null };
 
 const dailyQuotes = [
   { text: '一切都在流动。', author: '赫拉克利特' },
@@ -32,27 +44,11 @@ const dailyQuotes = [
   { text: '重要的是不要停止发问。', author: '爱因斯坦' },
   { text: '自由是对必然的认识。', author: '斯宾诺莎' },
   { text: '认识你自己。', author: '德尔斐箴言' },
-  { text: '世界以痛吻我。', author: '泰戈尔' },
   { text: '凡是过往，皆为序章。', author: '莎士比亚' },
-  { text: '黑夜给了我黑色的眼睛。', author: '顾城' },
-  { text: '面朝大海，春暖花开。', author: '海子' },
-  { text: '答案在风中飘。', author: '鲍勃·迪伦' },
-  { text: '愿你有好运气。', author: '雷蒙德·卡佛' },
-  { text: '道路本身就是答案。', author: '卡夫卡' },
-  { text: '凡不能毁灭我的，必使我强大。', author: '尼采' },
-  { text: '爱具体的人。', author: '陀思妥耶夫斯基' },
-  { text: '人可以被毁灭，不能被打败。', author: '海明威' },
-  { text: '纵有疾风起，人生不言弃。', author: '瓦雷里' },
-  { text: '要么孤独，要么庸俗。', author: '叔本华' },
-  { text: '真实的生活在别处。', author: '米兰·昆德拉' },
-  { text: '我们仍未知道答案。', author: '生活' },
-  { text: '慢慢来，比较快。', author: '民间箴言' },
-  { text: '保持热爱，奔赴山海。', author: '网络箴言' },
   { text: '今日事，今日毕。', author: '富兰克林' },
   { text: '把时间当作朋友。', author: '李笑来' },
   { text: '行动胜过空想。', author: '歌德' },
-  { text: '去生活，而不是解释生活。', author: '加缪' },
-  { text: '在隆冬，我终于知道。', author: '加缪' }
+  { text: '去生活，而不是解释生活。', author: '加缪' }
 ];
 
 function dayOfYear(date) {
@@ -67,7 +63,7 @@ function renderDailyQuote(date = new Date()) {
   const quoteAuthor = $('quoteAuthor');
   if (!quoteText || !quoteAuthor) return;
   quoteText.textContent = quote.text;
-  quoteAuthor.textContent = `——${quote.author}`;
+  quoteAuthor.textContent = `-- ${quote.author}`;
 }
 
 function currentMonth() {
@@ -106,31 +102,26 @@ function formatDue(iso) {
   return `${m}/${day} ${h}:${min}`;
 }
 
-function linkify(text) {
-  const frag = document.createDocumentFragment();
-  const regex = /(https?:\/\/[^\s]+)/g;
-  let lastIndex = 0;
-  let match;
-  while ((match = regex.exec(text)) !== null) {
-    if (match.index > lastIndex) frag.append(document.createTextNode(text.slice(lastIndex, match.index)));
-    const a = document.createElement('a');
-    a.href = match[0];
-    a.target = '_blank';
-    a.rel = 'noopener noreferrer';
-    a.textContent = match[0];
-    frag.append(a);
-    lastIndex = match.index + match[0].length;
-  }
-  if (lastIndex < text.length) frag.append(document.createTextNode(text.slice(lastIndex)));
-  return frag;
-}
-
-function renderNote(note) {
+function renderTodoNote(note) {
   if (!note) return null;
   const noteEl = document.createElement('div');
-  noteEl.className = 'todo-note';
-  noteEl.append(linkify(note));
+  noteEl.className = 'todo-note markdown-preview compact-markdown';
+  noteEl.innerHTML = renderMarkdown(note);
   return noteEl;
+}
+
+function updateNotePreview() {
+  const html = renderMarkdown(noteMarkdownInput.value);
+  notePreview.classList.toggle('empty-preview', !html);
+  notePreview.innerHTML = html || '开始输入后显示预览。';
+}
+
+function resetNoteForm() {
+  noteState.currentId = null;
+  noteForm.reset();
+  saveNoteButton.textContent = '保存笔记';
+  cancelNoteEdit.classList.add('hidden');
+  updateNotePreview();
 }
 
 function openEditModal(item) {
@@ -156,7 +147,7 @@ function renderList(container, items, completed = false) {
   if (!items.length) {
     const empty = document.createElement('div');
     empty.className = 'empty';
-    empty.textContent = completed ? '这个月还没有完成事项。' : '这个月暂时没有未完成事项，轻松一点也很好。';
+    empty.textContent = completed ? '这个月还没有完成事项。' : '这个月暂时没有未完成事项。';
     container.appendChild(empty);
     return;
   }
@@ -172,7 +163,7 @@ function renderList(container, items, completed = false) {
     check.setAttribute('aria-label', completed ? `取消完成：${item.title}` : `标记完成：${item.title}`);
     check.addEventListener('click', async () => {
       await request(`/api/todos/${item.id}/${completed ? 'uncomplete' : 'complete'}`, { method: 'POST' });
-      toast(completed ? '已恢复到未完成~' : '完成啦，真棒！');
+      toast(completed ? '已恢复到未完成' : '已完成');
       await loadTodos();
     });
 
@@ -186,7 +177,7 @@ function renderList(container, items, completed = false) {
     meta.innerHTML = `<span class="badge ${item.priority}">${priorityLabel(item.priority)}</span><span>截止 ${formatDue(item.due_at)}</span>${item.completed_at ? `<span>完成 ${formatDue(item.completed_at)}</span>` : ''}`;
 
     body.append(title, meta);
-    const noteEl = renderNote(item.note || '');
+    const noteEl = renderTodoNote(item.note || '');
     if (noteEl) body.append(noteEl);
 
     const actions = document.createElement('div');
@@ -217,6 +208,67 @@ function renderList(container, items, completed = false) {
   }
 }
 
+function editNote(note) {
+  noteState.currentId = note.id;
+  noteTitleInput.value = note.title || '';
+  noteMarkdownInput.value = note.body || '';
+  saveNoteButton.textContent = '保存修改';
+  cancelNoteEdit.classList.remove('hidden');
+  updateNotePreview();
+  noteTitleInput.focus();
+}
+
+function renderNotes() {
+  notesList.innerHTML = '';
+  if (!state.notes.length) {
+    const empty = document.createElement('div');
+    empty.className = 'empty';
+    empty.textContent = '还没有笔记。';
+    notesList.appendChild(empty);
+    return;
+  }
+
+  for (const note of state.notes) {
+    const item = document.createElement('article');
+    item.className = 'note-item';
+
+    const head = document.createElement('div');
+    head.className = 'note-item-head';
+    const title = document.createElement('h3');
+    title.textContent = note.title;
+    const time = document.createElement('span');
+    time.textContent = `更新 ${formatDue(note.updated_at)}`;
+    head.append(title, time);
+
+    const preview = document.createElement('div');
+    preview.className = 'markdown-preview note-body-preview';
+    preview.innerHTML = renderMarkdown(note.body || '');
+
+    const actions = document.createElement('div');
+    actions.className = 'actions note-item-actions';
+    const edit = document.createElement('button');
+    edit.className = 'icon-btn';
+    edit.type = 'button';
+    edit.textContent = '编辑';
+    edit.addEventListener('click', () => editNote(note));
+    const del = document.createElement('button');
+    del.className = 'icon-btn danger';
+    del.type = 'button';
+    del.textContent = '删除';
+    del.addEventListener('click', async () => {
+      if (!confirm(`删除笔记「${note.title}」？`)) return;
+      await request(`/api/notes/${note.id}`, { method: 'DELETE' });
+      if (noteState.currentId === note.id) resetNoteForm();
+      toast('笔记已删除');
+      await loadNotes();
+    });
+    actions.append(edit, del);
+
+    item.append(head, preview, actions);
+    notesList.appendChild(item);
+  }
+}
+
 async function loadTodos() {
   state.month = monthPicker.value || currentMonth();
   state.data = await request(`/api/todos?month=${encodeURIComponent(state.month)}`);
@@ -224,6 +276,13 @@ async function loadTodos() {
   completedMeta.textContent = `${state.data.completed.length} 件已完成，最近完成的在前面。`;
   renderList(pendingList, state.data.pending, false);
   renderList(completedList, state.data.completed, true);
+}
+
+async function loadNotes() {
+  const data = await request('/api/notes');
+  state.notes = data.notes || [];
+  notesMeta.textContent = `${state.notes.length} 条笔记，最近更新的在前面。`;
+  renderNotes();
 }
 
 function shiftMonth(delta) {
@@ -244,11 +303,27 @@ $('todoForm').addEventListener('submit', async (e) => {
   await request('/api/todos', { method: 'POST', body: JSON.stringify(payload) });
   $('titleInput').value = '';
   $('noteInput').value = '';
-  toast('已添加待办~');
+  toast('已添加待办');
   const dueMonth = payload.due_at.slice(0, 7);
   if (dueMonth !== monthPicker.value) monthPicker.value = dueMonth;
   await loadTodos();
 });
+
+noteMarkdownInput.addEventListener('input', updateNotePreview);
+noteForm.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const payload = {
+    title: noteTitleInput.value,
+    body: noteMarkdownInput.value
+  };
+  const editing = Boolean(noteState.currentId);
+  const path = editing ? `/api/notes/${noteState.currentId}` : '/api/notes';
+  await request(path, { method: editing ? 'PATCH' : 'POST', body: JSON.stringify(payload) });
+  toast(editing ? '笔记已更新' : '笔记已保存');
+  resetNoteForm();
+  await loadNotes();
+});
+cancelNoteEdit.addEventListener('click', resetNoteForm);
 
 monthPicker.addEventListener('change', () => loadTodos().catch(err => toast(err.message)));
 $('prevMonth').addEventListener('click', () => shiftMonth(-1));
@@ -266,7 +341,7 @@ editForm.addEventListener('submit', async (e) => {
     note: editNoteInput.value
   };
   await request(`/api/todos/${editState.currentId}`, { method: 'PATCH', body: JSON.stringify(payload) });
-  toast('已保存修改~');
+  toast('已保存修改');
   closeEditModalFn();
   await loadTodos();
 });
@@ -280,4 +355,5 @@ function initDueInput() {
 monthPicker.value = currentMonth();
 renderDailyQuote();
 initDueInput();
-loadTodos().catch(err => toast(err.message));
+updateNotePreview();
+Promise.all([loadTodos(), loadNotes()]).catch(err => toast(err.message));

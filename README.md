@@ -1,26 +1,22 @@
-# Puck Todo
+# Puck Office
 
-轻量个人月度待办服务：Python 标准库 + SQLite + 原生 HTML/CSS/JS。
+轻量个人办公站：Cloudflare Workers + D1 + 原生 HTML/CSS/JS。当前功能包括月度待办、独立笔记、Markdown 实时预览。
 
-## 启动
+## 本地开发
 
 ```bash
-cd /home/admin/workspace/puck-todo
-./start.sh
+npm install
+npx wrangler d1 create puck_todo_db
+D1_DATABASE_ID=<上一步输出的 database_id> node scripts/prepare-wrangler-config.mjs
+npm run db:migrate:local
+npm run dev
 ```
 
 访问：
 
 ```text
-http://服务器IP:8787/
+http://127.0.0.1:8787/
 ```
-
-## 字段
-
-- 事件名称
-- 优先级：low / medium / high / urgent
-- 截止时间
-- 状态：pending / completed
 
 ## API
 
@@ -32,11 +28,19 @@ PATCH  /api/todos/{id}
 DELETE /api/todos/{id}
 POST   /api/todos/{id}/complete
 POST   /api/todos/{id}/uncomplete
-GET    /api/reminders/daily
-GET    /api/reminders/due-soon?window_minutes=30
+GET    /api/notes
+POST   /api/notes
+GET    /api/notes/{id}
+PATCH  /api/notes/{id}
+DELETE /api/notes/{id}
 ```
 
-## Hermes cron
+## GitHub Actions 自动部署
 
-- 每日提醒：`30 8 * * *` 执行 `/home/admin/.hermes/hermes-agent/venv/bin/python3 /home/admin/workspace/puck-todo/remind.py daily`
-- 截止前提醒：`*/5 * * * *` 执行 `/home/admin/.hermes/hermes-agent/venv/bin/python3 /home/admin/workspace/puck-todo/remind.py due-soon`
+在 GitHub 仓库 Settings -> Secrets and variables -> Actions 中配置：
+
+- `CLOUDFLARE_API_TOKEN`
+- `CLOUDFLARE_ACCOUNT_ID`
+- `CLOUDFLARE_D1_DATABASE_ID`
+
+push 到 `main` 或 `cloudflare-office-notes` 后会自动运行测试、应用 D1 migrations，并部署 Worker。不要把 Cloudflare API Token 写进仓库文件。

@@ -66,6 +66,36 @@ jobs:
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
 
+      - name: Validate Cloudflare D1 database
+        run: |
+          node --input-type=module <<'NODE'
+          const accountId = process.env.CLOUDFLARE_ACCOUNT_ID;
+          const databaseId = process.env.CLOUDFLARE_D1_DATABASE_ID;
+          const url = `https://api.cloudflare.com/client/v4/accounts/${accountId}/d1/database/${databaseId}`;
+
+          const response = await fetch(url, {
+            headers: {
+              Authorization: `Bearer ${process.env.CLOUDFLARE_API_TOKEN}`
+            }
+          });
+
+          const body = await response.json().catch(() => null);
+          if (!response.ok || !body?.success) {
+            const errors = Array.isArray(body?.errors)
+              ? body.errors.map(({ code, message }) => `${code}: ${message}`).join('; ')
+              : `${response.status}: ${response.statusText}`;
+            console.error(`::error title=Cloudflare D1 validation failed::${errors}`);
+            process.exit(1);
+          }
+
+          const name = body?.result?.name || body?.result?.database_name || 'configured D1 database';
+          console.log(`Cloudflare D1 database is reachable: ${name}`);
+          NODE
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          CLOUDFLARE_D1_DATABASE_ID: ${{ secrets.CLOUDFLARE_D1_DATABASE_ID }}
+
       - name: Validate D1 database binding
         uses: cloudflare/wrangler-action@v3
         with:

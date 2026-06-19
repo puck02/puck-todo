@@ -18,6 +18,7 @@ test('Cloudflare deployment files are wired for Workers, D1, assets, and GitHub 
   assert.match(workflow, /CLOUDFLARE_API_TOKEN/);
   assert.match(workflow, /CLOUDFLARE_ACCOUNT_ID/);
   assert.match(workflow, /CLOUDFLARE_D1_DATABASE_ID/);
-  assert.match(workflow, /d1 migrations apply puck_todo_db --remote/);
+  assert.match(workflow, /d1 migrations apply DB --remote/);
+  assert.match(workflow, /Validate Cloudflare credentials/);
   assert.match(migration, /CREATE TABLE IF NOT EXISTS notes/);
 });

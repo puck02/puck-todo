@@ -43,12 +43,26 @@ jobs:
         env:
           D1_DATABASE_ID: ${{ secrets.CLOUDFLARE_D1_DATABASE_ID }}
 
+      - name: Validate Cloudflare credentials
+        uses: cloudflare/wrangler-action@v4
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          command: whoami
+
+      - name: Validate D1 database binding
+        uses: cloudflare/wrangler-action@v4
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          command: d1 info DB
+
       - name: Apply D1 migrations
         uses: cloudflare/wrangler-action@v4
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          command: d1 migrations apply puck_todo_db --remote
+          command: d1 migrations apply DB --remote
 
       - name: Deploy Worker
         uses: cloudflare/wrangler-action@v4

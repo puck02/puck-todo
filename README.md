@@ -44,3 +44,10 @@ DELETE /api/notes/{id}
 - `CLOUDFLARE_D1_DATABASE_ID`
 
 push 到 `main` 或 `cloudflare-office-notes` 后会自动运行测试、应用 D1 migrations，并部署 Worker。不要把 Cloudflare API Token 写进仓库文件。
+
+如果 Actions 在 `Apply D1 migrations` 失败，优先检查：
+
+- `CLOUDFLARE_API_TOKEN` 是否存在且没有过期。
+- API Token 是否限定到正确 Cloudflare account，并拥有 Workers 编辑和 D1 编辑权限。
+- `CLOUDFLARE_ACCOUNT_ID` 是否属于同一个 Cloudflare account。
+- `CLOUDFLARE_D1_DATABASE_ID` 是否来自名为 `puck_todo_db` 的 D1 数据库。

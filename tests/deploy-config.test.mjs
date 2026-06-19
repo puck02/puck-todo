@@ -13,7 +13,8 @@ test('Cloudflare deployment files are wired for Workers, D1, assets, and GitHub 
   assert.match(wrangler, /"binding":\s*"DB"/);
   assert.match(wrangler, /"binding":\s*"ASSETS"/);
   assert.match(wrangler, /"compatibility_date":\s*"2026-06-19"/);
-  assert.match(workflow, /cloudflare\/wrangler-action@v4/);
+  assert.match(workflow, /cloudflare\/wrangler-action@v3/);
+  assert.match(workflow, /wranglerVersion:\s*"4"/);
   assert.match(workflow, /Validate required secrets/);
   assert.match(workflow, /CLOUDFLARE_API_TOKEN/);
   assert.match(workflow, /CLOUDFLARE_ACCOUNT_ID/);

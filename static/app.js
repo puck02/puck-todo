@@ -274,10 +274,22 @@ function initNotesPage() {
 
     for (const note of state.notes) {
       const item = document.createElement('article');
-      item.className = `note-item ${noteState.currentId === note.id ? 'selected' : ''}`;
+      item.className = `note-file-card ${noteState.currentId === note.id ? 'selected' : ''}`;
 
-      const head = document.createElement('div');
+      const fileIcon = document.createElement('button');
+      fileIcon.className = 'file-icon';
+      fileIcon.type = 'button';
+      fileIcon.setAttribute('aria-label', `打开笔记：${note.title}`);
+      fileIcon.addEventListener('click', () => editNote(note));
+      const fileLines = document.createElement('span');
+      fileLines.className = 'file-lines';
+      fileLines.innerHTML = '<i></i><i></i><i></i>';
+      fileIcon.append(fileLines);
+
+      const head = document.createElement('button');
       head.className = 'note-item-head';
+      head.type = 'button';
+      head.addEventListener('click', () => editNote(note));
       const title = document.createElement('h3');
       title.textContent = note.title;
       const time = document.createElement('span');
@@ -285,7 +297,7 @@ function initNotesPage() {
       head.append(title, time);
 
       const preview = document.createElement('div');
-      preview.className = 'markdown-preview note-body-preview';
+      preview.className = 'markdown-preview file-preview';
       preview.innerHTML = renderMarkdown(note.body || '');
 
       const actions = document.createElement('div');
@@ -308,7 +320,7 @@ function initNotesPage() {
       });
       actions.append(edit, del);
 
-      item.append(head, preview, actions);
+      item.append(fileIcon, head, preview, actions);
       notesList.appendChild(item);
     }
   }

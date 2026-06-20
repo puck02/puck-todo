@@ -32,6 +32,7 @@ test('office UI keeps todos and notes on separate pages', async () => {
   assert.match(notesHtml, /finder-icon-grid/);
   assert.match(notesHtml, /class="folder-stage"/);
   assert.match(notesHtml, /class="note-form editor-form"/);
+  assert.ok(notesHtml.indexOf('class="preview-wrap"') < notesHtml.indexOf('class="field editor-field"'));
   assert.doesNotMatch(notesHtml, /全部笔记/);
   assert.match(notesHtml, /type="module"/);
   assert.match(app, /from '\/markdown\.js'/);
@@ -47,11 +48,17 @@ test('office UI keeps todos and notes on separate pages', async () => {
   assert.match(app, /note-file-card/);
   assert.match(app, /folder-card/);
   assert.match(app, /file-icon/);
-  assert.match(app, /file-preview/);
+  assert.doesNotMatch(app, /file-preview/);
+  assert.doesNotMatch(app, /dblclick/);
+  assert.match(app, /addEventListener\('click', openItem\)/);
   assert.match(app, /stopPropagation\(\)/);
   assert.doesNotMatch(app, /toggleNotesDrawer/);
   assert.doesNotMatch(app, /drawer-collapsed/);
   assert.match(style, /\.folder-icon/);
   assert.match(style, /\.editor-view/);
+  assert.match(style, /\.topbar\s*\{[\s\S]*position:\s*fixed/);
+  assert.match(style, /\.topbar\s*\{[\s\S]*background:\s*rgba\(255,\s*255,\s*255,\s*0\.7\)/);
+  assert.match(style, /\.topbar\s*\{[\s\S]*backdrop-filter:\s*blur\(12px\)/);
+  assert.doesNotMatch(style, /\.file-preview/);
   assert.doesNotMatch(style, /notes-drawer|finder-body|drawer-collapsed|finder-workspace|note-actions|note-editor|note-item-actions/);
 });

@@ -51,14 +51,14 @@
         <button id="saveNoteButton" class="primary-btn" type="submit" form="noteForm">保存</button>
       </div>
       <form id="noteForm" class="note-form editor-form">
-        <label class="field editor-field">
-          <span>Markdown</span>
-          <textarea id="noteMarkdownInput" rows="20" maxlength="20000" placeholder="# 标题&#10;&#10;- 记录要点&#10;- **重点**"></textarea>
-        </label>
         <div class="preview-wrap">
           <span>预览</span>
           <div id="notePreview" class="markdown-preview empty-preview">开始输入后显示预览。</div>
         </div>
+        <label class="field editor-field">
+          <span>Markdown</span>
+          <textarea id="noteMarkdownInput" rows="20" maxlength="20000" placeholder="# 标题&#10;&#10;- 记录要点&#10;- **重点**"></textarea>
+        </label>
       </form>
     </section>
   </main>

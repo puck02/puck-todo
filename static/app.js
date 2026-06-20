@@ -324,13 +324,12 @@ function initNotesPage() {
       const item = document.createElement('article');
       item.className = `note-file-card ${note.type === 'folder' ? 'folder-card' : 'file-card'}`;
       item.addEventListener('contextmenu', (event) => openContextMenu(event, note));
-      item.addEventListener('dblclick', openItem);
+      item.addEventListener('click', openItem);
 
       const fileIcon = document.createElement('button');
       fileIcon.className = note.type === 'folder' ? 'folder-icon' : 'file-icon';
       fileIcon.type = 'button';
       fileIcon.setAttribute('aria-label', note.type === 'folder' ? `进入文件夹：${note.title}` : `打开笔记：${note.title}`);
-      fileIcon.addEventListener('dblclick', openItem);
       const fileLines = document.createElement('span');
       fileLines.className = 'file-lines';
       fileLines.innerHTML = '<i></i><i></i><i></i>';
@@ -344,18 +343,13 @@ function initNotesPage() {
       const head = document.createElement('button');
       head.className = 'note-item-head';
       head.type = 'button';
-      head.addEventListener('dblclick', openItem);
       const title = document.createElement('h3');
       title.textContent = note.title;
       const time = document.createElement('span');
       time.textContent = formatDue(note.updated_at);
       head.append(title, time);
 
-      const preview = document.createElement('div');
-      preview.className = 'markdown-preview file-preview';
-      preview.innerHTML = note.type === 'folder' ? '<span>文件夹</span>' : (renderMarkdown(note.body || '') || '<span>空文件</span>');
-
-      item.append(fileIcon, head, preview);
+      item.append(fileIcon, head);
       notesList.appendChild(item);
     }
   }

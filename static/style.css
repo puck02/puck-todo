@@ -31,6 +31,7 @@ html {
 body {
   margin: 0;
   min-height: 100vh;
+  padding-top: 65px;
   color: var(--ink);
   background:
     linear-gradient(180deg, rgba(255, 253, 248, 0.9), rgba(244, 240, 232, 0.96)),
@@ -81,13 +82,15 @@ a:focus-visible {
 }
 
 .topbar {
-  position: sticky;
+  position: fixed;
   top: 0;
+  left: 0;
+  right: 0;
   z-index: 20;
   border-bottom: 1px solid var(--line);
-  background: rgba(244, 240, 232, 0.86);
-  backdrop-filter: blur(18px);
-  -webkit-backdrop-filter: blur(18px);
+  background: rgba(255, 255, 255, 0.7);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
 }
 
 .topbar-inner {
@@ -758,7 +761,7 @@ textarea:focus {
 .note-file-card {
   min-width: 0;
   display: grid;
-  grid-template-rows: auto auto auto;
+  grid-template-rows: auto auto;
   justify-items: center;
   gap: 9px;
   padding: 10px 9px 12px;
@@ -939,38 +942,6 @@ textarea:focus {
   font-variant-numeric: tabular-nums;
 }
 
-.file-preview {
-  width: min(150px, 100%);
-  min-height: 38px;
-  max-height: 74px;
-  overflow: hidden;
-  padding: 6px 8px;
-  border: 0;
-  border-radius: 7px;
-  background: rgba(255, 254, 251, 0.5);
-  color: rgba(30, 31, 28, 0.58);
-  text-align: left;
-  font-size: 11px;
-  line-height: 1.36;
-  mask-image: linear-gradient(180deg, #000 70%, transparent);
-}
-
-.folder-card .file-preview {
-  display: none;
-}
-
-.file-preview h1,
-.file-preview h2,
-.file-preview h3,
-.file-preview p,
-.file-preview ul,
-.file-preview blockquote,
-.file-preview pre {
-  margin-bottom: 5px;
-  font-size: 11px;
-  line-height: 1.36;
-}
-
 .editor-view {
   display: grid;
   grid-template-rows: auto minmax(0, 1fr);
@@ -1008,7 +979,7 @@ textarea:focus {
   padding: 18px;
 }
 
-.editor-field {
+.editor-form .preview-wrap {
   border-right: 1px solid var(--line);
 }
 
@@ -1300,12 +1271,12 @@ textarea:focus {
 
   .editor-field {
     min-height: 360px;
-    border-right: 0;
-    border-bottom: 1px solid var(--line);
   }
 
   .editor-form .preview-wrap {
     min-height: 360px;
+    border-right: 0;
+    border-bottom: 1px solid var(--line);
   }
 
   .edit-actions {
@@ -1319,6 +1290,10 @@ textarea:focus {
 }
 
 @media (max-width: 560px) {
+  body {
+    padding-top: 106px;
+  }
+
   .shell,
   .topbar-inner {
     width: min(100vw - 18px, 480px);

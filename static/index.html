@@ -3,19 +3,29 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <meta name="description" content="Puck Office 是一个轻量个人办公站，整合月度待办和 Markdown 笔记。" />
-  <meta name="theme-color" content="#f6f1e8" />
-  <title>Puck Office</title>
+  <meta name="description" content="Puck Office 个人待办和笔记。" />
+  <meta name="theme-color" content="#f4f0e8" />
+  <title>Puck Office · 待办</title>
   <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
   <link rel="stylesheet" href="/style.css" />
 </head>
-<body>
-  <main class="shell">
-    <section class="hero">
+<body data-page="todos">
+  <a class="skip-link" href="#content">跳到内容</a>
+  <header class="topbar">
+    <div class="topbar-inner">
+      <a class="brand" href="/">Puck Office</a>
+      <nav class="main-nav" aria-label="主导航">
+        <a class="active" href="/" aria-current="page">待办</a>
+        <a href="/notes.html">笔记</a>
+      </nav>
+    </div>
+  </header>
+
+  <main id="content" class="shell">
+    <section class="page-head">
       <div>
-        <p class="eyebrow">Puck Office</p>
-        <h1 id="dailyQuote"><span id="quoteText">一切都在流动。</span><span id="quoteAuthor">——赫拉克利特</span></h1>
-        <p class="subtitle">一处安静的个人办公站，记录本月待办和随手笔记。</p>
+        <p class="eyebrow">Todo</p>
+        <h1>待办</h1>
       </div>
       <div class="month-card" aria-label="月份选择">
         <button id="prevMonth" class="ghost-btn" type="button" title="上个月">‹</button>
@@ -24,71 +34,37 @@
       </div>
     </section>
 
-    <section class="workspace-grid">
-      <section class="panel composer">
-        <div class="panel-head">
-          <div>
-            <h2>新增待办</h2>
-            <p>写下事件、优先级和截止时间。</p>
-          </div>
-        </div>
-        <form id="todoForm" class="form-grid">
-          <label class="field title-field">
-            <span>事件名称</span>
-            <input id="titleInput" type="text" maxlength="120" placeholder="例如：准备项目周报" required />
-          </label>
-          <label class="field">
-            <span>优先级</span>
-            <select id="priorityInput">
-              <option value="low">低</option>
-              <option value="medium" selected>中</option>
-              <option value="high">高</option>
-              <option value="urgent">紧急</option>
-            </select>
-          </label>
-          <label class="field">
-            <span>截止时间</span>
-            <input id="dueInput" type="datetime-local" required />
-          </label>
-          <label class="field note-field">
-            <span>备注</span>
-            <textarea id="noteInput" rows="3" maxlength="2000" placeholder="可以记录链接、资料地址等"></textarea>
-          </label>
-          <button class="primary-btn" type="submit">添加</button>
-        </form>
-      </section>
-
-      <section class="panel note-workbench">
-        <div class="panel-head">
-          <div>
-            <h2>添加笔记</h2>
-            <p>输入 Markdown，右侧实时渲染。</p>
-          </div>
-        </div>
-        <form id="noteForm" class="note-form">
-          <label class="field">
-            <span>标题</span>
-            <input id="noteTitleInput" type="text" maxlength="120" placeholder="例如：今日复盘" required />
-          </label>
-          <div class="note-editor">
-            <label class="field">
-              <span>Markdown</span>
-              <textarea id="noteMarkdownInput" rows="10" maxlength="20000" placeholder="# 标题&#10;&#10;- [ ] 待办&#10;- **重点**"></textarea>
-            </label>
-            <div class="preview-wrap">
-              <span>预览</span>
-              <div id="notePreview" class="markdown-preview empty-preview">开始输入后显示预览。</div>
-            </div>
-          </div>
-          <div class="note-actions">
-            <button id="cancelNoteEdit" class="ghost-action hidden" type="button">取消编辑</button>
-            <button id="saveNoteButton" class="primary-btn" type="submit">保存笔记</button>
-          </div>
-        </form>
-      </section>
+    <section class="panel composer">
+      <div class="panel-head compact-head">
+        <h2>新增待办</h2>
+      </div>
+      <form id="todoForm" class="form-grid">
+        <label class="field title-field">
+          <span>事项</span>
+          <input id="titleInput" type="text" maxlength="120" placeholder="准备项目周报" required />
+        </label>
+        <label class="field">
+          <span>优先级</span>
+          <select id="priorityInput">
+            <option value="low">低</option>
+            <option value="medium" selected>中</option>
+            <option value="high">高</option>
+            <option value="urgent">紧急</option>
+          </select>
+        </label>
+        <label class="field">
+          <span>截止</span>
+          <input id="dueInput" type="datetime-local" required />
+        </label>
+        <label class="field note-field">
+          <span>备注</span>
+          <textarea id="noteInput" rows="3" maxlength="2000"></textarea>
+        </label>
+        <button class="primary-btn" type="submit">添加</button>
+      </form>
     </section>
 
-    <section class="columns office-columns">
+    <section class="columns todo-columns">
       <section class="panel list-panel">
         <div class="panel-head">
           <div>
@@ -103,20 +79,10 @@
         <div class="panel-head">
           <div>
             <h2>已完成</h2>
-            <p id="completedMeta">完成的事项会收纳在这里。</p>
+            <p id="completedMeta">Loading...</p>
           </div>
         </div>
         <div id="completedList" class="todo-list"></div>
-      </section>
-
-      <section class="panel list-panel notes-panel">
-        <div class="panel-head">
-          <div>
-            <h2>笔记</h2>
-            <p id="notesMeta">随手记录会收纳在这里。</p>
-          </div>
-        </div>
-        <div id="notesList" class="notes-list"></div>
       </section>
     </section>
   </main>
@@ -127,13 +93,12 @@
       <div class="panel-head modal-head">
         <div>
           <h2 id="editTitle">编辑待办</h2>
-          <p>修改名称、优先级、截止时间和备注，然后保存。</p>
         </div>
         <button id="closeEditModal" class="ghost-btn modal-close" type="button" aria-label="关闭编辑窗口">×</button>
       </div>
       <form id="editForm" class="form-grid edit-form">
         <label class="field title-field">
-          <span>事件名称</span>
+          <span>事项</span>
           <input id="editTitleInput" type="text" maxlength="120" required />
         </label>
         <label class="field">
@@ -146,7 +111,7 @@
           </select>
         </label>
         <label class="field">
-          <span>截止时间</span>
+          <span>截止</span>
           <input id="editDueInput" type="datetime-local" required />
         </label>
         <label class="field note-field">
@@ -155,7 +120,7 @@
         </label>
         <div class="edit-actions">
           <button id="cancelEdit" class="ghost-action" type="button">取消</button>
-          <button class="primary-btn" type="submit">保存修改</button>
+          <button class="primary-btn" type="submit">保存</button>
         </div>
       </form>
     </div>

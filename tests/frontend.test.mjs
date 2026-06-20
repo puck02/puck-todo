@@ -19,10 +19,18 @@ test('office UI keeps todos and notes on separate pages', async () => {
   assert.match(notesHtml, /id="noteMarkdownInput"/);
   assert.match(notesHtml, /id="notePreview"/);
   assert.match(notesHtml, /id="notesList"/);
+  assert.match(notesHtml, /class="finder-shell drawer-collapsed"/);
+  assert.match(notesHtml, /id="toggleNotesDrawer"/);
+  assert.match(notesHtml, /aria-controls="notesDrawer"/);
+  assert.match(notesHtml, /id="notesDrawer"/);
+  assert.match(notesHtml, /class="finder-workspace"/);
+  assert.doesNotMatch(notesHtml, /全部笔记/);
   assert.match(notesHtml, /type="module"/);
   assert.match(app, /from '\/markdown\.js'/);
   assert.match(app, /\/api\/notes/);
   assert.match(app, /renderMarkdown/);
   assert.match(app, /initTodosPage/);
   assert.match(app, /initNotesPage/);
+  assert.match(app, /toggleNotesDrawer/);
+  assert.match(app, /drawer-collapsed/);
 });

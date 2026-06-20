@@ -218,8 +218,10 @@ function initTodosPage() {
 
 function initNotesPage() {
   const state = { notes: [] };
+  const notesFinder = $('notesFinder');
   const notesList = $('notesList');
   const notesMeta = $('notesMeta');
+  const toggleNotesDrawer = $('toggleNotesDrawer');
   const noteForm = $('noteForm');
   const noteTitleInput = $('noteTitleInput');
   const noteMarkdownInput = $('noteMarkdownInput');
@@ -227,6 +229,11 @@ function initNotesPage() {
   const saveNoteButton = $('saveNoteButton');
   const cancelNoteEdit = $('cancelNoteEdit');
   const noteState = { currentId: null };
+
+  function setDrawerOpen(open) {
+    notesFinder.classList.toggle('drawer-collapsed', !open);
+    toggleNotesDrawer.setAttribute('aria-expanded', String(open));
+  }
 
   function updateNotePreview() {
     const html = renderMarkdown(noteMarkdownInput.value);
@@ -240,6 +247,7 @@ function initNotesPage() {
     saveNoteButton.textContent = '保存';
     cancelNoteEdit.classList.add('hidden');
     updateNotePreview();
+    renderNotes();
   }
 
   function editNote(note) {
@@ -249,6 +257,8 @@ function initNotesPage() {
     saveNoteButton.textContent = '保存修改';
     cancelNoteEdit.classList.remove('hidden');
     updateNotePreview();
+    renderNotes();
+    if (window.matchMedia('(max-width: 760px)').matches) setDrawerOpen(false);
     noteTitleInput.focus();
   }
 
@@ -264,7 +274,7 @@ function initNotesPage() {
 
     for (const note of state.notes) {
       const item = document.createElement('article');
-      item.className = 'note-item';
+      item.className = `note-item ${noteState.currentId === note.id ? 'selected' : ''}`;
 
       const head = document.createElement('div');
       head.className = 'note-item-head';
@@ -325,7 +335,11 @@ function initNotesPage() {
     await loadNotes();
   });
   cancelNoteEdit.addEventListener('click', resetNoteForm);
+  toggleNotesDrawer.addEventListener('click', () => {
+    setDrawerOpen(notesFinder.classList.contains('drawer-collapsed'));
+  });
 
+  setDrawerOpen(false);
   updateNotePreview();
   loadNotes().catch(err => toast(err.message));
 }

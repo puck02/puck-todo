@@ -30,36 +30,44 @@
       <p id="notesMeta" class="page-meta">Loading...</p>
     </section>
 
-    <section class="notes-layout">
-      <aside class="panel list-panel notes-panel">
-        <div class="panel-head compact-head">
-          <h2>全部笔记</h2>
+    <section id="notesFinder" class="finder-shell drawer-collapsed">
+      <div class="finder-toolbar">
+        <div class="traffic-lights" aria-hidden="true">
+          <span class="red"></span>
+          <span class="yellow"></span>
+          <span class="green"></span>
         </div>
-        <div id="notesList" class="notes-list"></div>
-      </aside>
+        <button id="toggleNotesDrawer" class="finder-toggle" type="button" aria-controls="notesDrawer" aria-expanded="false">笔记</button>
+      </div>
 
-      <section class="panel note-workbench">
-        <form id="noteForm" class="note-form">
-          <label class="field">
-            <span>标题</span>
-            <input id="noteTitleInput" type="text" maxlength="120" placeholder="今日复盘" required />
-          </label>
-          <div class="note-editor">
+      <div class="finder-body">
+        <aside id="notesDrawer" class="notes-drawer" aria-label="笔记文件">
+          <div id="notesList" class="notes-list finder-list"></div>
+        </aside>
+
+        <section class="finder-workspace">
+          <form id="noteForm" class="note-form">
             <label class="field">
-              <span>Markdown</span>
-              <textarea id="noteMarkdownInput" rows="14" maxlength="20000" placeholder="# 标题&#10;&#10;- 记录要点&#10;- **重点**"></textarea>
+              <span>标题</span>
+              <input id="noteTitleInput" type="text" maxlength="120" placeholder="今日复盘" required />
             </label>
-            <div class="preview-wrap">
-              <span>预览</span>
-              <div id="notePreview" class="markdown-preview empty-preview">开始输入后显示预览。</div>
+            <div class="note-editor">
+              <label class="field editor-field">
+                <span>Markdown</span>
+                <textarea id="noteMarkdownInput" rows="18" maxlength="20000" placeholder="# 标题&#10;&#10;- 记录要点&#10;- **重点**"></textarea>
+              </label>
+              <div class="preview-wrap">
+                <span>预览</span>
+                <div id="notePreview" class="markdown-preview empty-preview">开始输入后显示预览。</div>
+              </div>
             </div>
-          </div>
-          <div class="note-actions">
-            <button id="cancelNoteEdit" class="ghost-action hidden" type="button">取消</button>
-            <button id="saveNoteButton" class="primary-btn" type="submit">保存</button>
-          </div>
-        </form>
-      </section>
+            <div class="note-actions">
+              <button id="cancelNoteEdit" class="ghost-action hidden" type="button">取消</button>
+              <button id="saveNoteButton" class="primary-btn" type="submit">保存</button>
+            </div>
+          </form>
+        </section>
+      </div>
     </section>
   </main>
 

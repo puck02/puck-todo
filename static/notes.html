@@ -21,56 +21,51 @@
     </div>
   </header>
 
-  <main id="content" class="shell">
-    <section class="page-head">
-      <div>
-        <p class="eyebrow">Notes</p>
-        <h1>笔记</h1>
-      </div>
-      <p id="notesMeta" class="page-meta">Loading...</p>
-    </section>
-
-    <section id="notesFinder" class="finder-shell drawer-collapsed">
+  <main id="content" class="shell notes-shell">
+    <section id="folderView" class="finder-shell folder-view">
       <div class="finder-toolbar">
         <div class="traffic-lights" aria-hidden="true">
           <span class="red"></span>
           <span class="yellow"></span>
           <span class="green"></span>
         </div>
-        <button id="toggleNotesDrawer" class="finder-toggle" type="button" aria-controls="notesDrawer" aria-expanded="false">笔记</button>
+        <nav id="breadcrumb" class="breadcrumb" aria-label="路径"></nav>
+        <p id="notesMeta" class="finder-count">Loading...</p>
+        <div class="finder-actions">
+          <button id="newItemButton" class="finder-toggle" type="button" aria-haspopup="menu" aria-expanded="false">新建</button>
+          <div id="newItemMenu" class="finder-menu hidden" role="menu">
+            <button type="button" role="menuitem" data-create-type="file">文件</button>
+            <button type="button" role="menuitem" data-create-type="folder">文件夹</button>
+          </div>
+        </div>
       </div>
-
-      <div class="finder-body">
-        <aside id="notesDrawer" class="notes-drawer" aria-label="笔记文件">
-          <div id="notesList" class="notes-list finder-icon-grid"></div>
-        </aside>
-
-        <section class="finder-workspace">
-          <form id="noteForm" class="note-form">
-            <label class="field">
-              <span>标题</span>
-              <input id="noteTitleInput" type="text" maxlength="120" placeholder="今日复盘" required />
-            </label>
-            <div class="note-editor">
-              <label class="field editor-field">
-                <span>Markdown</span>
-                <textarea id="noteMarkdownInput" rows="18" maxlength="20000" placeholder="# 标题&#10;&#10;- 记录要点&#10;- **重点**"></textarea>
-              </label>
-              <div class="preview-wrap">
-                <span>预览</span>
-                <div id="notePreview" class="markdown-preview empty-preview">开始输入后显示预览。</div>
-              </div>
-            </div>
-            <div class="note-actions">
-              <button id="cancelNoteEdit" class="ghost-action hidden" type="button">取消</button>
-              <button id="saveNoteButton" class="primary-btn" type="submit">保存</button>
-            </div>
-          </form>
-        </section>
+      <div class="folder-stage">
+        <div id="notesList" class="notes-list finder-icon-grid"></div>
       </div>
+    </section>
+
+    <section id="editorView" class="editor-view hidden">
+      <div class="editor-toolbar">
+        <button id="backToFolder" class="ghost-action" type="button">返回</button>
+        <input id="noteTitleInput" type="text" maxlength="120" placeholder="未命名" form="noteForm" required />
+        <button id="saveNoteButton" class="primary-btn" type="submit" form="noteForm">保存</button>
+      </div>
+      <form id="noteForm" class="note-form editor-form">
+        <label class="field editor-field">
+          <span>Markdown</span>
+          <textarea id="noteMarkdownInput" rows="20" maxlength="20000" placeholder="# 标题&#10;&#10;- 记录要点&#10;- **重点**"></textarea>
+        </label>
+        <div class="preview-wrap">
+          <span>预览</span>
+          <div id="notePreview" class="markdown-preview empty-preview">开始输入后显示预览。</div>
+        </div>
+      </form>
     </section>
   </main>
 
+  <div id="contextMenu" class="context-menu hidden" role="menu">
+    <button id="deleteContextItem" type="button" role="menuitem">删除</button>
+  </div>
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
   <script type="module" src="/app.js"></script>
 </body>

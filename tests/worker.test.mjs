@@ -40,6 +40,21 @@ class FakeStatement {
     if (sql.startsWith('SELECT * FROM notes ORDER BY')) {
       return { results: [...this.db.notes].sort((a, b) => b.updated_at.localeCompare(a.updated_at)) };
     }
+    if (sql.startsWith('SELECT * FROM notes WHERE parent_id=?')) {
+      const [parentId] = this.params;
+      return {
+        results: this.db.notes
+          .filter((note) => note.parent_id === parentId)
+          .sort((a, b) => sortNotes(a, b, sql))
+      };
+    }
+    if (sql.startsWith('SELECT * FROM notes WHERE parent_id IS NULL')) {
+      return {
+        results: this.db.notes
+          .filter((note) => note.parent_id === null)
+          .sort((a, b) => sortNotes(a, b, sql))
+      };
+    }
     throw new Error(`Unexpected all SQL: ${sql}`);
   }
 
@@ -76,10 +91,33 @@ class FakeStatement {
       return { meta: { last_row_id: id, changes: 1 } };
     }
     if (sql.startsWith('INSERT INTO notes')) {
-      const [title, body, now] = this.params;
+      const [title, body, type = 'file', parent_id = null, now] = this.params;
       const id = this.db.nextNoteId++;
-      this.db.notes.push({ id, title, body, created_at: now, updated_at: now });
+      this.db.notes.push({ id, title, body, type, parent_id, created_at: now, updated_at: now });
       return { meta: { last_row_id: id, changes: 1 } };
+    }
+    if (sql.startsWith('DELETE FROM notes WHERE id IN')) {
+      const [id] = this.params;
+      const ids = new Set([id]);
+      let changed = true;
+      while (changed) {
+        changed = false;
+        for (const note of this.db.notes) {
+          if (ids.has(note.parent_id) && !ids.has(note.id)) {
+            ids.add(note.id);
+            changed = true;
+          }
+        }
+      }
+      const before = this.db.notes.length;
+      this.db.notes = this.db.notes.filter((note) => !ids.has(note.id));
+      return { meta: { changes: before - this.db.notes.length } };
+    }
+    if (sql.startsWith('DELETE FROM notes WHERE id=')) {
+      const [id] = this.params;
+      const before = this.db.notes.length;
+      this.db.notes = this.db.notes.filter((note) => note.id !== id);
+      return { meta: { changes: before - this.db.notes.length } };
     }
     if (sql.startsWith("UPDATE todos SET status='completed'")) {
       const [now, , id] = this.params;
@@ -96,6 +134,17 @@ class FakeStatement {
 
 function priorityWeight(priority) {
   return { urgent: 4, high: 3, medium: 2, low: 1 }[priority] || 0;
+}
+
+function sortNotes(a, b, sql = '') {
+  const typeOrder = sql.includes('CASE type')
+    ? typeWeight(a.type) - typeWeight(b.type)
+    : String(a.type).localeCompare(String(b.type));
+  return typeOrder || b.updated_at.localeCompare(a.updated_at) || b.created_at.localeCompare(a.created_at);
+}
+
+function typeWeight(type) {
+  return type === 'folder' ? 0 : 1;
 }
 
 async function request(db, path, options = {}) {
@@ -135,4 +184,45 @@ test('Worker notes API creates notes and lists newest first', async () => {
   const listed = await request(db, '/api/notes');
   assert.equal(listed.body.notes.length, 1);
   assert.equal(listed.body.notes[0].title, '灵感');
+});
+
+test('Worker notes API supports nested folders and files', async () => {
+  const db = new FakeD1();
+
+  const rootFile = await request(db, '/api/notes', {
+    method: 'POST',
+    body: JSON.stringify({ title: '根文件', type: 'file', body: '根目录内容' })
+  });
+  assert.equal(rootFile.res.status, 201);
+
+  const folder = await request(db, '/api/notes', {
+    method: 'POST',
+    body: JSON.stringify({ title: '项目', type: 'folder' })
+  });
+  assert.equal(folder.res.status, 201);
+  assert.equal(folder.body.type, 'folder');
+  assert.equal(folder.body.parent_id, null);
+
+  const file = await request(db, '/api/notes', {
+    method: 'POST',
+    body: JSON.stringify({ title: '方案', type: 'file', parent_id: folder.body.id, body: '# 方案\n\n内容' })
+  });
+  assert.equal(file.res.status, 201);
+  assert.equal(file.body.type, 'file');
+  assert.equal(file.body.parent_id, folder.body.id);
+
+  const root = await request(db, '/api/notes');
+  assert.deepEqual(root.body.path, []);
+  assert.deepEqual(root.body.notes.map((item) => item.title), ['项目', '根文件']);
+
+  const nested = await request(db, `/api/notes?parent_id=${folder.body.id}`);
+  assert.deepEqual(nested.body.path.map((item) => item.title), ['项目']);
+  assert.deepEqual(nested.body.notes.map((item) => item.title), ['方案']);
+
+  const deleted = await request(db, `/api/notes/${folder.body.id}`, { method: 'DELETE' });
+  assert.equal(deleted.body.ok, true);
+
+  const afterDelete = await request(db, '/api/notes');
+  assert.deepEqual(afterDelete.body.notes.map((item) => item.title), ['根文件']);
+  assert.equal(db.notes.length, 1);
 });

@@ -217,23 +217,23 @@ function initTodosPage() {
 }
 
 function initNotesPage() {
-  const state = { notes: [] };
-  const notesFinder = $('notesFinder');
+  const state = { notes: [], path: [], parentId: null, contextItem: null };
+  const folderView = $('folderView');
+  const editorView = $('editorView');
   const notesList = $('notesList');
   const notesMeta = $('notesMeta');
-  const toggleNotesDrawer = $('toggleNotesDrawer');
+  const breadcrumb = $('breadcrumb');
+  const newItemButton = $('newItemButton');
+  const newItemMenu = $('newItemMenu');
+  const contextMenu = $('contextMenu');
+  const deleteContextItem = $('deleteContextItem');
+  const backToFolder = $('backToFolder');
   const noteForm = $('noteForm');
   const noteTitleInput = $('noteTitleInput');
   const noteMarkdownInput = $('noteMarkdownInput');
   const notePreview = $('notePreview');
   const saveNoteButton = $('saveNoteButton');
-  const cancelNoteEdit = $('cancelNoteEdit');
   const noteState = { currentId: null };
-
-  function setDrawerOpen(open) {
-    notesFinder.classList.toggle('drawer-collapsed', !open);
-    toggleNotesDrawer.setAttribute('aria-expanded', String(open));
-  }
 
   function updateNotePreview() {
     const html = renderMarkdown(noteMarkdownInput.value);
@@ -241,55 +241,110 @@ function initNotesPage() {
     notePreview.innerHTML = html || '开始输入后显示预览。';
   }
 
-  function resetNoteForm() {
-    noteState.currentId = null;
-    noteForm.reset();
-    saveNoteButton.textContent = '保存';
-    cancelNoteEdit.classList.add('hidden');
-    updateNotePreview();
-    renderNotes();
+  function folderQuery() {
+    return state.parentId ? `?parent_id=${state.parentId}` : '';
   }
 
-  function editNote(note) {
+  function closeMenus() {
+    newItemMenu.classList.add('hidden');
+    newItemButton.setAttribute('aria-expanded', 'false');
+    contextMenu.classList.add('hidden');
+    state.contextItem = null;
+  }
+
+  function openEditor(note) {
     noteState.currentId = note.id;
     noteTitleInput.value = note.title || '';
     noteMarkdownInput.value = note.body || '';
-    saveNoteButton.textContent = '保存修改';
-    cancelNoteEdit.classList.remove('hidden');
+    saveNoteButton.textContent = '保存';
+    folderView.classList.add('hidden');
+    editorView.classList.remove('hidden');
     updateNotePreview();
-    renderNotes();
-    if (window.matchMedia('(max-width: 760px)').matches) setDrawerOpen(false);
     noteTitleInput.focus();
+  }
+
+  function closeEditor() {
+    noteState.currentId = null;
+    noteForm.reset();
+    editorView.classList.add('hidden');
+    folderView.classList.remove('hidden');
+    updateNotePreview();
+  }
+
+  async function enterFolder(folder) {
+    state.parentId = folder ? folder.id : null;
+    closeEditor();
+    await loadNotes();
+  }
+
+  function renderBreadcrumb() {
+    breadcrumb.innerHTML = '';
+    const root = document.createElement('button');
+    root.type = 'button';
+    root.textContent = '根目录';
+    root.addEventListener('click', () => enterFolder(null).catch(err => toast(err.message)));
+    breadcrumb.appendChild(root);
+    for (const item of state.path) {
+      const crumb = document.createElement('button');
+      crumb.type = 'button';
+      crumb.textContent = item.title;
+      crumb.addEventListener('click', () => enterFolder(item).catch(err => toast(err.message)));
+      breadcrumb.appendChild(crumb);
+    }
+  }
+
+  function openContextMenu(event, item) {
+    event.preventDefault();
+    event.stopPropagation();
+    state.contextItem = item;
+    const menuWidth = 136;
+    const menuHeight = 48;
+    contextMenu.style.left = `${Math.min(event.clientX, window.innerWidth - menuWidth - 8)}px`;
+    contextMenu.style.top = `${Math.min(event.clientY, window.innerHeight - menuHeight - 8)}px`;
+    contextMenu.classList.remove('hidden');
   }
 
   function renderNotes() {
     notesList.innerHTML = '';
+    renderBreadcrumb();
     if (!state.notes.length) {
       const empty = document.createElement('div');
       empty.className = 'empty';
-      empty.textContent = '暂无笔记。';
+      empty.textContent = '空文件夹。';
       notesList.appendChild(empty);
       return;
     }
 
     for (const note of state.notes) {
+      const openItem = (event) => {
+        event.stopPropagation();
+        if (note.type === 'folder') enterFolder(note).catch(err => toast(err.message));
+        else openEditor(note);
+      };
       const item = document.createElement('article');
-      item.className = `note-file-card ${noteState.currentId === note.id ? 'selected' : ''}`;
+      item.className = `note-file-card ${note.type === 'folder' ? 'folder-card' : 'file-card'}`;
+      item.addEventListener('contextmenu', (event) => openContextMenu(event, note));
+      item.addEventListener('dblclick', openItem);
 
       const fileIcon = document.createElement('button');
-      fileIcon.className = 'file-icon';
+      fileIcon.className = note.type === 'folder' ? 'folder-icon' : 'file-icon';
       fileIcon.type = 'button';
-      fileIcon.setAttribute('aria-label', `打开笔记：${note.title}`);
-      fileIcon.addEventListener('click', () => editNote(note));
+      fileIcon.setAttribute('aria-label', note.type === 'folder' ? `进入文件夹：${note.title}` : `打开笔记：${note.title}`);
+      fileIcon.addEventListener('dblclick', openItem);
       const fileLines = document.createElement('span');
       fileLines.className = 'file-lines';
       fileLines.innerHTML = '<i></i><i></i><i></i>';
-      fileIcon.append(fileLines);
+      if (note.type !== 'folder') {
+        const iconPreview = document.createElement('span');
+        iconPreview.className = 'file-icon-preview compact-markdown';
+        iconPreview.innerHTML = renderMarkdown(note.body || '');
+        fileIcon.append(iconPreview, fileLines);
+      }
 
       const head = document.createElement('button');
       head.className = 'note-item-head';
       head.type = 'button';
-      head.addEventListener('click', () => editNote(note));
+      head.addEventListener('dblclick', openItem);
       const title = document.createElement('h3');
       title.textContent = note.title;
       const time = document.createElement('span');
@@ -298,38 +353,42 @@ function initNotesPage() {
 
       const preview = document.createElement('div');
       preview.className = 'markdown-preview file-preview';
-      preview.innerHTML = renderMarkdown(note.body || '');
+      preview.innerHTML = note.type === 'folder' ? '<span>文件夹</span>' : (renderMarkdown(note.body || '') || '<span>空文件</span>');
 
-      const actions = document.createElement('div');
-      actions.className = 'actions note-item-actions';
-      const edit = document.createElement('button');
-      edit.className = 'icon-btn';
-      edit.type = 'button';
-      edit.textContent = '编辑';
-      edit.addEventListener('click', () => editNote(note));
-      const del = document.createElement('button');
-      del.className = 'icon-btn danger';
-      del.type = 'button';
-      del.textContent = '删除';
-      del.addEventListener('click', async () => {
-        if (!confirm(`删除笔记「${note.title}」？`)) return;
-        await request(`/api/notes/${note.id}`, { method: 'DELETE' });
-        if (noteState.currentId === note.id) resetNoteForm();
-        toast('已删除');
-        await loadNotes();
-      });
-      actions.append(edit, del);
-
-      item.append(fileIcon, head, preview, actions);
+      item.append(fileIcon, head, preview);
       notesList.appendChild(item);
     }
   }
 
   async function loadNotes() {
-    const data = await request('/api/notes');
+    const data = await request(`/api/notes${folderQuery()}`);
     state.notes = data.notes || [];
+    state.path = data.path || [];
     notesMeta.textContent = `${state.notes.length} 条`;
     renderNotes();
+  }
+
+  async function createItem(type) {
+    const title = prompt(type === 'folder' ? '文件夹名称' : '文件名称');
+    if (!title) return;
+    const payload = { title, type, parent_id: state.parentId };
+    if (type === 'file') payload.body = '';
+    const item = await request('/api/notes', { method: 'POST', body: JSON.stringify(payload) });
+    toast(type === 'folder' ? '已新建文件夹' : '已新建文件');
+    await loadNotes();
+    if (type === 'file') openEditor(item);
+  }
+
+  async function deleteContextTarget() {
+    if (!state.contextItem) return;
+    const target = state.contextItem;
+    const label = state.contextItem.type === 'folder' ? '文件夹' : '文件';
+    if (!confirm(`删除${label}「${state.contextItem.title}」？`)) return;
+    await request(`/api/notes/${target.id}`, { method: 'DELETE' });
+    state.contextItem = null;
+    closeMenus();
+    toast('已删除');
+    await loadNotes();
   }
 
   noteMarkdownInput.addEventListener('input', updateNotePreview);
@@ -339,19 +398,31 @@ function initNotesPage() {
       title: noteTitleInput.value,
       body: noteMarkdownInput.value
     };
-    const editing = Boolean(noteState.currentId);
-    const path = editing ? `/api/notes/${noteState.currentId}` : '/api/notes';
-    await request(path, { method: editing ? 'PATCH' : 'POST', body: JSON.stringify(payload) });
-    toast(editing ? '已更新' : '已保存');
-    resetNoteForm();
+    if (!noteState.currentId) return;
+    await request(`/api/notes/${noteState.currentId}`, { method: 'PATCH', body: JSON.stringify(payload) });
+    toast('已保存');
     await loadNotes();
   });
-  cancelNoteEdit.addEventListener('click', resetNoteForm);
-  toggleNotesDrawer.addEventListener('click', () => {
-    setDrawerOpen(notesFinder.classList.contains('drawer-collapsed'));
+  backToFolder.addEventListener('click', closeEditor);
+  newItemButton.addEventListener('click', () => {
+    const open = newItemMenu.classList.toggle('hidden');
+    newItemButton.setAttribute('aria-expanded', String(!open));
+  });
+  newItemMenu.addEventListener('click', (event) => {
+    const type = event.target?.dataset?.createType;
+    if (!type) return;
+    closeMenus();
+    createItem(type).catch(err => toast(err.message));
+  });
+  deleteContextItem.addEventListener('click', (event) => {
+    event.stopPropagation();
+    deleteContextTarget().catch(err => toast(err.message));
+  });
+  contextMenu.addEventListener('click', (event) => event.stopPropagation());
+  document.addEventListener('click', (event) => {
+    if (!newItemMenu.contains(event.target) && event.target !== newItemButton && !contextMenu.contains(event.target)) closeMenus();
   });
 
-  setDrawerOpen(false);
   updateNotePreview();
   loadNotes().catch(err => toast(err.message));
 }

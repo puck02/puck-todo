@@ -1,6 +1,7 @@
 const PRIORITY_WEIGHT = { urgent: 4, high: 3, medium: 2, low: 1 };
 const VALID_PRIORITIES = new Set(Object.keys(PRIORITY_WEIGHT));
 const VALID_STATUS = new Set(['pending', 'completed']);
+const VALID_NOTE_TYPES = new Set(['file', 'folder']);
 
 class HttpError extends Error {
   constructor(message, status = 400) {
@@ -26,6 +27,15 @@ function normalizeTodo(row) {
   return {
     ...row,
     priority_label: { urgent: '紧急', high: '高', medium: '中', low: '低' }[row.priority] || row.priority
+  };
+}
+
+function normalizeNote(row) {
+  return {
+    ...row,
+    type: row.type || 'file',
+    parent_id: row.parent_id ?? null,
+    body: row.body || ''
   };
 }
 
@@ -81,9 +91,18 @@ function validateNotePayload(payload, partial = false) {
     updates.title = String(payload.title || '').trim();
     if (!updates.title) throw new HttpError('笔记标题不能为空');
   }
+  if ('type' in payload || !partial) {
+    updates.type = String(payload.type || 'file');
+    if (!VALID_NOTE_TYPES.has(updates.type)) throw new HttpError('笔记类型必须是 file/folder');
+  }
+  if ('parent_id' in payload || !partial) {
+    const parentId = payload.parent_id ?? null;
+    updates.parent_id = parentId === null || parentId === '' ? null : toId(parentId);
+  }
   if ('body' in payload || !partial) {
     updates.body = String(payload.body || '');
   }
+  if (updates.type === 'folder') updates.body = '';
   return updates;
 }
 
@@ -154,23 +173,47 @@ async function deleteTodo(db, id) {
 async function getNote(db, id) {
   const row = await db.prepare('SELECT * FROM notes WHERE id=?').bind(id).first();
   if (!row) throw new HttpError('笔记不存在', 404);
-  return row;
+  return normalizeNote(row);
 }
 
-async function listNotes(db) {
-  const { results = [] } = await db.prepare('SELECT * FROM notes ORDER BY updated_at DESC, created_at DESC').all();
-  return { notes: results };
+async function getNotePath(db, parentId) {
+  const path = [];
+  let currentId = parentId;
+  while (currentId) {
+    const item = await getNote(db, currentId);
+    if (item.type !== 'folder') throw new HttpError('父级必须是文件夹');
+    path.unshift({ id: item.id, title: item.title });
+    currentId = item.parent_id;
+  }
+  return path;
+}
+
+async function listNotes(db, parentId = null) {
+  const statement = parentId
+    ? db.prepare("SELECT * FROM notes WHERE parent_id=? ORDER BY CASE type WHEN 'folder' THEN 0 ELSE 1 END ASC, updated_at DESC, created_at DESC").bind(parentId)
+    : db.prepare("SELECT * FROM notes WHERE parent_id IS NULL ORDER BY CASE type WHEN 'folder' THEN 0 ELSE 1 END ASC, updated_at DESC, created_at DESC");
+  const { results = [] } = await statement.all();
+  return { parent_id: parentId, path: await getNotePath(db, parentId), notes: results.map(normalizeNote) };
 }
 
 async function createNote(db, payload) {
   const data = validateNotePayload(payload);
+  if (data.parent_id) {
+    const parent = await getNote(db, data.parent_id);
+    if (parent.type !== 'folder') throw new HttpError('父级必须是文件夹');
+  }
   const now = nowIso();
-  const result = await db.prepare('INSERT INTO notes (title, body, created_at, updated_at) VALUES (?, ?, ?, ?)').bind(data.title, data.body, now, now).run();
+  const result = await db.prepare('INSERT INTO notes (title, body, type, parent_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)').bind(data.title, data.body, data.type, data.parent_id, now, now).run();
   return getNote(db, result.meta.last_row_id);
 }
 
 async function updateNote(db, id, payload) {
   const updates = validateNotePayload(payload, true);
+  if (updates.parent_id) {
+    if (updates.parent_id === id) throw new HttpError('不能移动到自身');
+    const parent = await getNote(db, updates.parent_id);
+    if (parent.type !== 'folder') throw new HttpError('父级必须是文件夹');
+  }
   const keys = Object.keys(updates);
   if (!keys.length) return getNote(db, id);
   updates.updated_at = nowIso();
@@ -181,6 +224,11 @@ async function updateNote(db, id, payload) {
 }
 
 async function deleteNote(db, id) {
+  const item = await getNote(db, id);
+  if (item.type === 'folder') {
+    await db.prepare('DELETE FROM notes WHERE id IN (WITH RECURSIVE descendants(id) AS (SELECT id FROM notes WHERE id=? UNION ALL SELECT notes.id FROM notes INNER JOIN descendants ON notes.parent_id=descendants.id) SELECT id FROM descendants)').bind(id).run();
+    return { ok: true };
+  }
   const result = await db.prepare('DELETE FROM notes WHERE id=?').bind(id).run();
   return { ok: result.meta.changes > 0 };
 }
@@ -211,7 +259,11 @@ async function handleApi(request, env) {
   }
 
   if (parts[1] === 'notes') {
-    if (method === 'GET' && parts.length === 2) return json(await listNotes(env.DB));
+    if (method === 'GET' && parts.length === 2) {
+      const parentIdParam = url.searchParams.get('parent_id');
+      const parentId = parentIdParam ? toId(parentIdParam) : null;
+      return json(await listNotes(env.DB, parentId));
+    }
     if (method === 'POST' && parts.length === 2) return json(await createNote(env.DB, await readJson(request)), 201);
     if (parts.length === 3) {
       const id = toId(parts[2]);

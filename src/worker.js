@@ -60,8 +60,14 @@ function parseCookies(header = '') {
   return cookies;
 }
 
+function secretValue(env, name) {
+  const value = String(env[name] || '').trim();
+  const prefix = `${name}=`;
+  return value.startsWith(prefix) ? value.slice(prefix.length).trim() : value;
+}
+
 function hasAuthConfig(env) {
-  return Boolean(env.ADMIN_EMAIL && env.ADMIN_PASSWORD_HASH && env.AUTH_SECRET);
+  return Boolean(secretValue(env, 'ADMIN_EMAIL') && secretValue(env, 'ADMIN_PASSWORD_HASH') && secretValue(env, 'AUTH_SECRET'));
 }
 
 function requireAuthConfig(env) {
@@ -111,9 +117,10 @@ function clearSessionCookie() {
 async function getSessionUser(request, env) {
   if (!hasAuthConfig(env)) return null;
   const cookies = parseCookies(request.headers.get('Cookie') || '');
-  const session = await verifySessionToken(cookies.get(SESSION_COOKIE), env.AUTH_SECRET);
-  if (!session || String(session.email).toLowerCase() !== String(env.ADMIN_EMAIL).toLowerCase()) return null;
-  return { email: env.ADMIN_EMAIL };
+  const adminEmail = secretValue(env, 'ADMIN_EMAIL');
+  const session = await verifySessionToken(cookies.get(SESSION_COOKIE), secretValue(env, 'AUTH_SECRET'));
+  if (!session || String(session.email).toLowerCase() !== adminEmail.toLowerCase()) return null;
+  return { email: adminEmail };
 }
 
 async function verifyPassword(password, passwordHash) {
@@ -357,10 +364,11 @@ async function handleAuthApi(request, env, url) {
     const payload = await readJson(request);
     const email = String(payload.email || '').trim().toLowerCase();
     const password = String(payload.password || '');
-    const validEmail = email === String(env.ADMIN_EMAIL).toLowerCase();
-    const validPassword = await verifyPassword(password, env.ADMIN_PASSWORD_HASH);
+    const adminEmail = secretValue(env, 'ADMIN_EMAIL');
+    const validEmail = email === adminEmail.toLowerCase();
+    const validPassword = await verifyPassword(password, secretValue(env, 'ADMIN_PASSWORD_HASH'));
     if (!validEmail || !validPassword) throw new HttpError('账号或密码错误', 401);
-    const cookie = await createSessionCookie(env.ADMIN_EMAIL, env.AUTH_SECRET, url);
+    const cookie = await createSessionCookie(adminEmail, secretValue(env, 'AUTH_SECRET'), url);
     return json({ ok: true }, 200, { 'Set-Cookie': cookie });
   }
 

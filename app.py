@@ -58,8 +58,26 @@ def b64url_decode(value: str) -> bytes:
     return base64.urlsafe_b64decode((value + padding).encode("ascii"))
 
 
+def env_value(name: str) -> str:
+    value = os.environ.get(name, "").strip()
+    prefix = f"{name}="
+    return value[len(prefix):].strip() if value.startswith(prefix) else value
+
+
+def auth_email() -> str:
+    return env_value("ADMIN_EMAIL")
+
+
+def auth_password_hash() -> str:
+    return env_value("ADMIN_PASSWORD_HASH")
+
+
+def auth_secret() -> str:
+    return env_value("AUTH_SECRET")
+
+
 def has_auth_config() -> bool:
-    return bool(os.environ.get("ADMIN_EMAIL") and os.environ.get("ADMIN_PASSWORD_HASH") and os.environ.get("AUTH_SECRET"))
+    return bool(auth_email() and auth_password_hash() and auth_secret())
 
 
 def require_auth_config() -> None:
@@ -69,6 +87,8 @@ def require_auth_config() -> None:
 
 def verify_password(password: str, password_hash: str) -> bool:
     try:
+        if password_hash.startswith("ADMIN_PASSWORD_HASH="):
+            password_hash = password_hash.split("=", 1)[1].strip()
         scheme, iterations_value, salt_value, expected_value = password_hash.split("$", 3)
         iterations = int(iterations_value)
         if scheme != "pbkdf2_sha256" or iterations < 10000:
@@ -125,10 +145,11 @@ def session_user(cookie_header: str) -> dict[str, str] | None:
     if not has_auth_config():
         return None
     cookies = parse_cookie_header(cookie_header)
-    data = verify_session_token(cookies.get(SESSION_COOKIE), os.environ["AUTH_SECRET"])
-    if not data or str(data.get("email", "")).lower() != os.environ["ADMIN_EMAIL"].lower():
+    email = auth_email()
+    data = verify_session_token(cookies.get(SESSION_COOKIE), auth_secret())
+    if not data or str(data.get("email", "")).lower() != email.lower():
         return None
-    return {"email": os.environ["ADMIN_EMAIL"]}
+    return {"email": email}
 
 
 class TodoStore:
@@ -369,12 +390,13 @@ def make_handler(db_path: str):
                 payload = self.read_json()
                 email = str(payload.get("email", "")).strip().lower()
                 password = str(payload.get("password", ""))
-                valid_email = email == os.environ["ADMIN_EMAIL"].lower()
-                valid_password = verify_password(password, os.environ["ADMIN_PASSWORD_HASH"])
+                admin_email = auth_email()
+                valid_email = email == admin_email.lower()
+                valid_password = verify_password(password, auth_password_hash())
                 if not valid_email or not valid_password:
                     self.send_error_json("账号或密码错误", 401)
                     return True
-                cookie = create_session_cookie(os.environ["ADMIN_EMAIL"], os.environ["AUTH_SECRET"])
+                cookie = create_session_cookie(admin_email, auth_secret())
                 self.send_json({"ok": True}, headers={"Set-Cookie": cookie})
                 return True
             if self.command == "POST" and path == "/api/auth/logout":

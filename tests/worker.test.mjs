@@ -208,6 +208,23 @@ test('Worker auth protects APIs and issues a 30 day session cookie', async () =>
   assert.match(logout.res.headers.get('set-cookie'), /Max-Age=0/);
 });
 
+test('Worker auth accepts secrets pasted with variable names', async () => {
+  const db = new FakeD1();
+  const env = {
+    ADMIN_EMAIL: `ADMIN_EMAIL=${TEST_AUTH_ENV.ADMIN_EMAIL}`,
+    ADMIN_PASSWORD_HASH: `ADMIN_PASSWORD_HASH=${TEST_AUTH_ENV.ADMIN_PASSWORD_HASH}`,
+    AUTH_SECRET: 'AUTH_SECRET=test-auth-secret'
+  };
+
+  const login = await request(db, '/api/auth/login', {
+    method: 'POST',
+    body: JSON.stringify({ email: TEST_AUTH_ENV.ADMIN_EMAIL, password: 'correct-password' })
+  }, env);
+
+  assert.equal(login.res.status, 200);
+  assert.match(login.res.headers.get('set-cookie'), /puck_session=/);
+});
+
 test('Worker todo API creates todos and groups monthly lists by status', async () => {
   const db = new FakeD1();
 

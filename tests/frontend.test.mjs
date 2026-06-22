@@ -62,3 +62,30 @@ test('office UI keeps todos and notes on separate pages', async () => {
   assert.doesNotMatch(style, /\.file-preview/);
   assert.doesNotMatch(style, /notes-drawer|finder-body|drawer-collapsed|finder-workspace|note-actions|note-editor|note-item-actions/);
 });
+
+test('todo add and delete interactions use transitions with operation lockout', async () => {
+  const [app, style] = await Promise.all([
+    readFile(new URL('../static/app.js', import.meta.url), 'utf8'),
+    readFile(new URL('../static/style.css', import.meta.url), 'utf8')
+  ]);
+
+  const submitHandler = app.indexOf("$('todoForm').addEventListener('submit'");
+  const optimisticAdd = app.indexOf('addOptimisticTodo(payload)', submitHandler);
+  const createRequest = app.indexOf("request('/api/todos'", submitHandler);
+  assert.ok(submitHandler >= 0, 'todo form submit handler should exist');
+  assert.ok(optimisticAdd > submitHandler, 'submit handler should create an optimistic todo');
+  assert.ok(createRequest > optimisticAdd, 'optimistic todo should render before POST finishes');
+
+  const deleteHandler = app.indexOf("del.addEventListener('click'");
+  const deleteTransition = app.indexOf('removeTodoWithTransition(item.id)', deleteHandler);
+  const deleteRequest = app.indexOf("method: 'DELETE'", deleteHandler);
+  assert.ok(deleteHandler >= 0, 'delete click handler should exist');
+  assert.ok(deleteTransition > deleteHandler, 'delete handler should start a leave transition');
+  assert.ok(deleteRequest > deleteTransition, 'leave transition should run before DELETE request');
+
+  assert.match(app, /setTodoOperationBusy\(true\)/);
+  assert.match(app, /setTodoOperationBusy\(false\)/);
+  assert.match(style, /\.todo-locked/);
+  assert.match(style, /\.todo-item\.entering/);
+  assert.match(style, /\.todo-item\.leaving/);
+});

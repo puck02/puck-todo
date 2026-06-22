@@ -352,6 +352,14 @@ textarea:focus {
   background: #fffefb;
 }
 
+button:disabled,
+input:disabled,
+select:disabled,
+textarea:disabled {
+  cursor: wait;
+  opacity: .62;
+}
+
 .primary-btn,
 .ghost-action,
 .icon-btn {
@@ -432,7 +440,7 @@ textarea:focus {
   padding: 15px 18px;
   background: rgba(255, 253, 248, 0.68);
   border-bottom: 1px solid var(--line);
-  transition: background .18s ease;
+  transition: background .18s ease, opacity .22s ease, transform .22s ease, filter .22s ease;
 }
 
 .todo-item:last-child {
@@ -441,6 +449,26 @@ textarea:focus {
 
 .todo-item:hover {
   background: rgba(255, 254, 251, 0.96);
+}
+
+.todo-item.entering {
+  opacity: 0;
+  transform: translateY(8px) scale(.985);
+}
+
+.todo-item.leaving {
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(-8px) scale(.985);
+}
+
+.todo-item.pending-sync {
+  filter: saturate(.82);
+}
+
+.todo-locked .composer,
+.todo-locked .todo-columns {
+  cursor: wait;
 }
 
 .todo-item.completed {

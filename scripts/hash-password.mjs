@@ -1,5 +1,9 @@
 import { pbkdf2Sync, randomBytes } from 'node:crypto';
-import { stdin, stdout, exit } from 'node:process';
+import { resolve } from 'node:path';
+import { argv, stdin, stdout, exit } from 'node:process';
+import { fileURLToPath } from 'node:url';
+
+export const HASH_ITERATIONS = 100000;
 
 function base64Url(buffer) {
   return buffer.toString('base64').replace(/=/g, '').replace(/\+/g, '-').replace(/\//g, '_');
@@ -45,13 +49,21 @@ async function readPassword() {
   });
 }
 
-const password = await readPassword();
-if (!password) {
-  console.error('Password is required');
-  exit(1);
+export function hashPassword(password, salt = randomBytes(16)) {
+  const hash = pbkdf2Sync(password, salt, HASH_ITERATIONS, 32, 'sha256');
+  return `pbkdf2_sha256$${HASH_ITERATIONS}$${base64Url(salt)}$${base64Url(hash)}`;
 }
 
-const iterations = 120000;
-const salt = randomBytes(16);
-const hash = pbkdf2Sync(password, salt, iterations, 32, 'sha256');
-console.log(`pbkdf2_sha256$${iterations}$${base64Url(salt)}$${base64Url(hash)}`);
+async function main() {
+  const password = await readPassword();
+  if (!password) {
+    console.error('Password is required');
+    exit(1);
+  }
+
+  console.log(hashPassword(password));
+}
+
+if (argv[1] && fileURLToPath(import.meta.url) === resolve(argv[1])) {
+  await main();
+}

@@ -3,10 +3,11 @@ import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 
 test('Cloudflare deployment files are wired for Workers, D1, assets, and GitHub Actions', async () => {
-  const [wrangler, workflow, migration] = await Promise.all([
+  const [wrangler, workflow, migration, ciPrepare] = await Promise.all([
     readFile(new URL('../wrangler.jsonc', import.meta.url), 'utf8'),
     readFile(new URL('../.github/workflows/deploy.yml', import.meta.url), 'utf8'),
-    readFile(new URL('../migrations/0001_init.sql', import.meta.url), 'utf8')
+    readFile(new URL('../migrations/0001_init.sql', import.meta.url), 'utf8'),
+    readFile(new URL('../scripts/prepare-ci-wrangler-config.mjs', import.meta.url), 'utf8')
   ]);
 
   assert.match(wrangler, /"main":\s*"src\/worker\.js"/);
@@ -28,5 +29,18 @@ test('Cloudflare deployment files are wired for Workers, D1, assets, and GitHub 
   assert.match(workflow, /Validate Cloudflare D1 database/);
   assert.match(workflow, /d1 migrations apply DB --remote/);
   assert.match(workflow, /Validate D1 database binding/);
+  assert.match(workflow, /Prepare CI deploy config/);
+  assert.match(workflow, /prepare-ci-wrangler-config\.mjs/);
+  assert.match(workflow, /deploy --config wrangler\.ci\.jsonc --keep-vars/);
+  assert.match(workflow, /rm -f wrangler\.ci\.jsonc/);
+  assert.match(workflow, /Deploy Worker/);
+  assert.match(workflow, /wrangler\.ci\.jsonc/);
+  assert.match(workflow, /--keep-vars/);
+  assert.match(workflow, /command: deploy --config wrangler\.ci\.jsonc --keep-vars/);
+  assert.match(workflow, /CLOUDFLARE_API_TOKEN/);
+  assert.match(workflow, /CLOUDFLARE_ACCOUNT_ID/);
+  assert.match(workflow, /wranglerVersion:\s*"4"/);
+  assert.match(workflow, /cloudflare\/wrangler-action@v3/);
   assert.match(migration, /CREATE TABLE IF NOT EXISTS notes/);
+  assert.match(ciPrepare, /delete config\.routes/);
 });

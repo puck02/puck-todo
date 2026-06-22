@@ -90,10 +90,17 @@ jobs:
           wranglerVersion: "4"
           command: d1 migrations apply DB --remote
 
+      - name: Prepare CI deploy config
+        run: node scripts/prepare-ci-wrangler-config.mjs
+
       - name: Deploy Worker
         uses: cloudflare/wrangler-action@v3
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           wranglerVersion: "4"
-          command: deploy
+          command: deploy --config wrangler.ci.jsonc --keep-vars
+
+      - name: Remove CI deploy config
+        if: always()
+        run: rm -f wrangler.ci.jsonc

@@ -4,7 +4,8 @@ const VALID_STATUS = new Set(['pending', 'completed']);
 const VALID_NOTE_TYPES = new Set(['file', 'folder']);
 const SESSION_COOKIE = 'puck_session';
 const SESSION_TTL_SECONDS = 60 * 60 * 24 * 30;
-const PUBLIC_ASSET_PATHS = new Set(['/login.html', '/style.css', '/app.js', '/markdown.js', '/favicon.svg']);
+const LOGIN_ASSET_PATHS = new Set(['/login', '/login.html']);
+const PUBLIC_ASSET_PATHS = new Set(['/style.css', '/app.js', '/markdown.js', '/favicon.svg']);
 const encoder = new TextEncoder();
 
 class HttpError extends Error {
@@ -426,18 +427,20 @@ async function handleApi(request, env) {
 }
 
 function isPublicAsset(path) {
-  return PUBLIC_ASSET_PATHS.has(path);
+  return LOGIN_ASSET_PATHS.has(path) || PUBLIC_ASSET_PATHS.has(path);
 }
 
 async function serveAsset(request, env, url) {
   if (!env.ASSETS) return new Response('Not found', { status: 404 });
-  if (isPublicAsset(url.pathname)) return env.ASSETS.fetch(request);
-  const user = await getSessionUser(request, env);
-  if (user) {
-    if (url.pathname === '/login.html') return Response.redirect(new URL('/', url), 302);
+  if (LOGIN_ASSET_PATHS.has(url.pathname)) {
+    const user = await getSessionUser(request, env);
+    if (user) return Response.redirect(new URL('/', url), 302);
     return env.ASSETS.fetch(request);
   }
-  const loginUrl = new URL('/login.html', url);
+  if (isPublicAsset(url.pathname)) return env.ASSETS.fetch(request);
+  const user = await getSessionUser(request, env);
+  if (user) return env.ASSETS.fetch(request);
+  const loginUrl = new URL('/login', url);
   loginUrl.searchParams.set('next', `${url.pathname}${url.search}`);
   return Response.redirect(loginUrl, 302);
 }

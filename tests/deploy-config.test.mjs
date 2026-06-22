@@ -12,6 +12,9 @@ test('Cloudflare deployment files are wired for Workers, D1, assets, and GitHub 
   assert.match(wrangler, /"main":\s*"src\/worker\.js"/);
   assert.match(wrangler, /"binding":\s*"DB"/);
   assert.match(wrangler, /"binding":\s*"ASSETS"/);
+  assert.match(wrangler, /"run_worker_first":\s*true/);
+  assert.match(wrangler, /"pattern":\s*"notes\.nektos\.cn"/);
+  assert.match(wrangler, /"custom_domain":\s*true/);
   assert.match(wrangler, /"compatibility_date":\s*"2026-06-19"/);
   assert.match(wrangler, /"ADMIN_EMAIL"/);
   assert.match(wrangler, /"ADMIN_PASSWORD_HASH"/);

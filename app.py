@@ -24,7 +24,8 @@ VALID_PRIORITIES = set(PRIORITY_WEIGHT)
 VALID_STATUS = {"pending", "completed"}
 SESSION_COOKIE = "puck_session"
 SESSION_TTL_SECONDS = 60 * 60 * 24 * 30
-PUBLIC_ASSET_PATHS = {"/login.html", "/style.css", "/app.js", "/markdown.js", "/favicon.svg"}
+LOGIN_ASSET_PATHS = {"/login", "/login.html"}
+PUBLIC_ASSET_PATHS = LOGIN_ASSET_PATHS | {"/style.css", "/app.js", "/markdown.js", "/favicon.svg"}
 
 
 def now_local() -> datetime:
@@ -475,8 +476,12 @@ def make_handler(db_path: str):
         def serve_static(self, path: str) -> None:
             if path == "/":
                 path = "/index.html"
+            if path in LOGIN_ASSET_PATHS:
+                if self.current_user():
+                    return self.redirect("/")
+                path = "/login.html"
             if path not in PUBLIC_ASSET_PATHS and not self.current_user():
-                login_path = f"/login.html?next={path}"
+                login_path = f"/login?next={path}"
                 return self.redirect(login_path)
             safe = Path(path.lstrip("/")).as_posix()
             if ".." in safe:

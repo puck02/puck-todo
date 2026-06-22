@@ -22,6 +22,17 @@ class FakeD1 {
   }
 }
 
+class FakeAssets {
+  async fetch(request) {
+    const url = new URL(request.url);
+    if (url.pathname === '/login.html') return Response.redirect(new URL(`/login${url.search}`, url), 307);
+    if (url.pathname === '/login') return new Response('<form id="loginForm"></form>', {
+      headers: { 'Content-Type': 'text/html' }
+    });
+    return new Response(`asset:${url.pathname}`);
+  }
+}
+
 class FakeStatement {
   constructor(db, sql) {
     this.db = db;
@@ -159,6 +170,10 @@ async function request(db, path, options = {}, env = TEST_AUTH_ENV) {
   return { res, body };
 }
 
+async function assetRequest(db, path, options = {}, env = TEST_AUTH_ENV) {
+  return worker.fetch(new Request(`https://office.test${path}`, options), { DB: db, ASSETS: new FakeAssets(), ...env });
+}
+
 async function loginCookie(db) {
   const login = await request(db, '/api/auth/login', {
     method: 'POST',
@@ -223,6 +238,23 @@ test('Worker auth accepts secrets pasted with variable names', async () => {
 
   assert.equal(login.res.status, 200);
   assert.match(login.res.headers.get('set-cookie'), /puck_session=/);
+});
+
+test('Worker serves login assets without extension redirect loops', async () => {
+  const db = new FakeD1();
+
+  const root = await assetRequest(db, '/');
+  assert.equal(root.status, 302);
+  assert.equal(root.headers.get('location'), 'https://office.test/login?next=%2F');
+
+  const login = await assetRequest(db, '/login?next=%2F');
+  assert.equal(login.status, 200);
+  assert.match(await login.text(), /loginForm/);
+
+  const cookie = await loginCookie(db);
+  const authenticatedLogin = await assetRequest(db, '/login', { headers: { Cookie: cookie } });
+  assert.equal(authenticatedLogin.status, 302);
+  assert.equal(authenticatedLogin.headers.get('location'), 'https://office.test/');
 });
 
 test('Worker todo API creates todos and groups monthly lists by status', async () => {

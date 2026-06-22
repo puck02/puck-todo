@@ -13,7 +13,7 @@ async function request(path, options = {}) {
   const data = await res.json().catch(() => ({}));
   if (res.status === 401 && page !== 'login') {
     const next = encodeURIComponent(`${window.location.pathname}${window.location.search}`);
-    window.location.href = `/login.html?next=${next}`;
+    window.location.href = `/login?next=${next}`;
   }
   if (!res.ok) throw new Error(data.error || `请求失败：${res.status}`);
   return data;
@@ -67,7 +67,7 @@ function initLogoutButton() {
     } catch (err) {
       toast(err.message);
     } finally {
-      window.location.href = '/login.html';
+      window.location.href = '/login';
     }
   });
 }

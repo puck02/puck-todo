@@ -3,6 +3,12 @@ import test from 'node:test';
 
 import worker from '../src/worker.js';
 
+const TEST_AUTH_ENV = {
+  ADMIN_EMAIL: 'admin@example.com',
+  ADMIN_PASSWORD_HASH: 'pbkdf2_sha256$10000$dGVzdC1zYWx0$e792rbohsFefpyebymxZDyAc9fot5buAozShETJIG1c',
+  AUTH_SECRET: 'test-auth-secret'
+};
+
 class FakeD1 {
   constructor() {
     this.nextTodoId = 1;
@@ -147,25 +153,74 @@ function typeWeight(type) {
   return type === 'folder' ? 0 : 1;
 }
 
-async function request(db, path, options = {}) {
-  const res = await worker.fetch(new Request(`https://office.test${path}`, options), { DB: db });
+async function request(db, path, options = {}, env = TEST_AUTH_ENV) {
+  const res = await worker.fetch(new Request(`https://office.test${path}`, options), { DB: db, ...env });
   const body = await res.json();
   return { res, body };
 }
 
+async function loginCookie(db) {
+  const login = await request(db, '/api/auth/login', {
+    method: 'POST',
+    body: JSON.stringify({ email: TEST_AUTH_ENV.ADMIN_EMAIL, password: 'correct-password' })
+  });
+  assert.equal(login.res.status, 200);
+  const setCookie = login.res.headers.get('set-cookie');
+  assert.match(setCookie, /puck_session=/);
+  return setCookie.split(';')[0];
+}
+
+async function authenticatedRequest(db, path, options = {}) {
+  const headers = new Headers(options.headers || {});
+  headers.set('Cookie', await loginCookie(db));
+  return request(db, path, { ...options, headers });
+}
+
+test('Worker auth protects APIs and issues a 30 day session cookie', async () => {
+  const db = new FakeD1();
+
+  const denied = await request(db, '/api/todos?month=2026-06');
+  assert.equal(denied.res.status, 401);
+  assert.equal(denied.body.error, '请先登录');
+
+  const badLogin = await request(db, '/api/auth/login', {
+    method: 'POST',
+    body: JSON.stringify({ email: TEST_AUTH_ENV.ADMIN_EMAIL, password: 'wrong-password' })
+  });
+  assert.equal(badLogin.res.status, 401);
+
+  const cookie = await loginCookie(db);
+  const loginCookieHeader = (await request(db, '/api/auth/login', {
+    method: 'POST',
+    body: JSON.stringify({ email: TEST_AUTH_ENV.ADMIN_EMAIL, password: 'correct-password' })
+  })).res.headers.get('set-cookie');
+  assert.match(loginCookieHeader, /HttpOnly/);
+  assert.match(loginCookieHeader, /SameSite=Lax/);
+  assert.match(loginCookieHeader, /Secure/);
+  assert.match(loginCookieHeader, /Max-Age=2592000/);
+
+  const allowed = await request(db, '/api/todos?month=2026-06', { headers: { Cookie: cookie } });
+  assert.equal(allowed.res.status, 200);
+  assert.deepEqual(allowed.body.pending, []);
+
+  const logout = await request(db, '/api/auth/logout', { method: 'POST', headers: { Cookie: cookie } });
+  assert.equal(logout.res.status, 200);
+  assert.match(logout.res.headers.get('set-cookie'), /Max-Age=0/);
+});
+
 test('Worker todo API creates todos and groups monthly lists by status', async () => {
   const db = new FakeD1();
 
-  const created = await request(db, '/api/todos', {
+  const created = await authenticatedRequest(db, '/api/todos', {
     method: 'POST',
     body: JSON.stringify({ title: '写周报', priority: 'high', due_at: '2026-06-19T18:00:00', note: '同步进展' })
   });
   assert.equal(created.res.status, 201);
   assert.equal(created.body.title, '写周报');
 
-  await request(db, `/api/todos/${created.body.id}/complete`, { method: 'POST' });
+  await authenticatedRequest(db, `/api/todos/${created.body.id}/complete`, { method: 'POST' });
 
-  const listed = await request(db, '/api/todos?month=2026-06');
+  const listed = await authenticatedRequest(db, '/api/todos?month=2026-06');
   assert.deepEqual(listed.body.pending, []);
   assert.equal(listed.body.completed[0].title, '写周报');
 });
@@ -173,7 +228,7 @@ test('Worker todo API creates todos and groups monthly lists by status', async (
 test('Worker notes API creates notes and lists newest first', async () => {
   const db = new FakeD1();
 
-  const created = await request(db, '/api/notes', {
+  const created = await authenticatedRequest(db, '/api/notes', {
     method: 'POST',
     body: JSON.stringify({ title: '灵感', body: '# 今天\n\n- 记录一个想法' })
   });
@@ -181,7 +236,7 @@ test('Worker notes API creates notes and lists newest first', async () => {
   assert.equal(created.body.title, '灵感');
   assert.equal(created.body.body, '# 今天\n\n- 记录一个想法');
 
-  const listed = await request(db, '/api/notes');
+  const listed = await authenticatedRequest(db, '/api/notes');
   assert.equal(listed.body.notes.length, 1);
   assert.equal(listed.body.notes[0].title, '灵感');
 });
@@ -189,13 +244,13 @@ test('Worker notes API creates notes and lists newest first', async () => {
 test('Worker notes API supports nested folders and files', async () => {
   const db = new FakeD1();
 
-  const rootFile = await request(db, '/api/notes', {
+  const rootFile = await authenticatedRequest(db, '/api/notes', {
     method: 'POST',
     body: JSON.stringify({ title: '根文件', type: 'file', body: '根目录内容' })
   });
   assert.equal(rootFile.res.status, 201);
 
-  const folder = await request(db, '/api/notes', {
+  const folder = await authenticatedRequest(db, '/api/notes', {
     method: 'POST',
     body: JSON.stringify({ title: '项目', type: 'folder' })
   });
@@ -203,7 +258,7 @@ test('Worker notes API supports nested folders and files', async () => {
   assert.equal(folder.body.type, 'folder');
   assert.equal(folder.body.parent_id, null);
 
-  const file = await request(db, '/api/notes', {
+  const file = await authenticatedRequest(db, '/api/notes', {
     method: 'POST',
     body: JSON.stringify({ title: '方案', type: 'file', parent_id: folder.body.id, body: '# 方案\n\n内容' })
   });
@@ -211,18 +266,18 @@ test('Worker notes API supports nested folders and files', async () => {
   assert.equal(file.body.type, 'file');
   assert.equal(file.body.parent_id, folder.body.id);
 
-  const root = await request(db, '/api/notes');
+  const root = await authenticatedRequest(db, '/api/notes');
   assert.deepEqual(root.body.path, []);
   assert.deepEqual(root.body.notes.map((item) => item.title), ['项目', '根文件']);
 
-  const nested = await request(db, `/api/notes?parent_id=${folder.body.id}`);
+  const nested = await authenticatedRequest(db, `/api/notes?parent_id=${folder.body.id}`);
   assert.deepEqual(nested.body.path.map((item) => item.title), ['项目']);
   assert.deepEqual(nested.body.notes.map((item) => item.title), ['方案']);
 
-  const deleted = await request(db, `/api/notes/${folder.body.id}`, { method: 'DELETE' });
+  const deleted = await authenticatedRequest(db, `/api/notes/${folder.body.id}`, { method: 'DELETE' });
   assert.equal(deleted.body.ok, true);
 
-  const afterDelete = await request(db, '/api/notes');
+  const afterDelete = await authenticatedRequest(db, '/api/notes');
   assert.deepEqual(afterDelete.body.notes.map((item) => item.title), ['根文件']);
   assert.equal(db.notes.length, 1);
 });

@@ -11,6 +11,10 @@ function apiHeaders(extra = {}) {
 async function request(path, options = {}) {
   const res = await fetch(path, { ...options, headers: apiHeaders(options.headers || {}) });
   const data = await res.json().catch(() => ({}));
+  if (res.status === 401 && page !== 'login') {
+    const next = encodeURIComponent(`${window.location.pathname}${window.location.search}`);
+    window.location.href = `/login.html?next=${next}`;
+  }
   if (!res.ok) throw new Error(data.error || `请求失败：${res.status}`);
   return data;
 }
@@ -47,6 +51,58 @@ function renderTodoNote(note) {
   noteEl.className = 'todo-note markdown-preview compact-markdown';
   noteEl.innerHTML = renderMarkdown(note);
   return noteEl;
+}
+
+function safeNextPath(value) {
+  return value && value.startsWith('/') && !value.startsWith('//') ? value : '/';
+}
+
+function initLogoutButton() {
+  const logoutButton = $('logoutButton');
+  if (!logoutButton) return;
+  logoutButton.addEventListener('click', async () => {
+    logoutButton.disabled = true;
+    try {
+      await request('/api/auth/logout', { method: 'POST' });
+    } catch (err) {
+      toast(err.message);
+    } finally {
+      window.location.href = '/login.html';
+    }
+  });
+}
+
+function initLoginPage() {
+  const loginForm = $('loginForm');
+  const emailInput = $('emailInput');
+  const passwordInput = $('passwordInput');
+  const loginButton = $('loginButton');
+  const params = new URLSearchParams(window.location.search);
+  const nextPath = safeNextPath(params.get('next'));
+
+  request('/api/auth/status')
+    .then((data) => {
+      if (data.authenticated) window.location.href = nextPath;
+    })
+    .catch(() => {});
+
+  loginForm.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    loginButton.disabled = true;
+    try {
+      await request('/api/auth/login', {
+        method: 'POST',
+        body: JSON.stringify({ email: emailInput.value, password: passwordInput.value })
+      });
+      window.location.href = nextPath;
+    } catch (err) {
+      toast(err.message);
+      passwordInput.value = '';
+      passwordInput.focus();
+    } finally {
+      loginButton.disabled = false;
+    }
+  });
 }
 
 function initTodosPage() {
@@ -564,5 +620,12 @@ function initNotesPage() {
   loadNotes().catch(err => toast(err.message));
 }
 
-if (page === 'todos') initTodosPage();
-if (page === 'notes') initNotesPage();
+if (page === 'login') initLoginPage();
+if (page === 'todos') {
+  initLogoutButton();
+  initTodosPage();
+}
+if (page === 'notes') {
+  initLogoutButton();
+  initNotesPage();
+}

@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="description" content="登录 Puck Office。" />
+  <meta name="theme-color" content="#f4f0e8" />
+  <title>Puck Office · 登录</title>
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+  <link rel="stylesheet" href="/style.css" />
+</head>
+<body data-page="login">
+  <main class="login-shell" id="content">
+    <section class="login-panel panel">
+      <div>
+        <p class="eyebrow">Puck Office</p>
+        <h1>登录</h1>
+      </div>
+      <form id="loginForm" class="login-form">
+        <label class="field">
+          <span>邮箱</span>
+          <input id="emailInput" type="email" autocomplete="username" required />
+        </label>
+        <label class="field">
+          <span>密码</span>
+          <input id="passwordInput" type="password" autocomplete="current-password" required />
+        </label>
+        <button id="loginButton" class="primary-btn" type="submit">进入</button>
+      </form>
+    </section>
+  </main>
+
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+  <script type="module" src="/app.js"></script>
+</body>
+</html>

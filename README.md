@@ -8,8 +8,17 @@
 npm install
 npx wrangler d1 create puck_todo_db
 D1_DATABASE_ID=<上一步输出的 database_id> node scripts/prepare-wrangler-config.mjs
+node scripts/hash-password.mjs
 npm run db:migrate:local
 npm run dev
+```
+
+登录需要配置三个环境变量。`.dev.vars` 已在 `.gitignore` 中，适合本地开发：
+
+```text
+ADMIN_EMAIL=<管理员邮箱>
+ADMIN_PASSWORD_HASH=<node scripts/hash-password.mjs 输出的内容>
+AUTH_SECRET=<随机长字符串>
 ```
 
 访问：
@@ -18,10 +27,23 @@ npm run dev
 http://127.0.0.1:8787/
 ```
 
+Cloudflare 线上环境用 Secret 保存同样三个值：
+
+```bash
+npx wrangler secret put ADMIN_EMAIL
+npx wrangler secret put ADMIN_PASSWORD_HASH
+npx wrangler secret put AUTH_SECRET
+```
+
+登录会话通过 HttpOnly Cookie 保持 30 天，到期后需要重新登录。
+
 ## API
 
 ```text
 GET    /api/health
+GET    /api/auth/status
+POST   /api/auth/login
+POST   /api/auth/logout
 GET    /api/todos?month=YYYY-MM
 POST   /api/todos
 PATCH  /api/todos/{id}

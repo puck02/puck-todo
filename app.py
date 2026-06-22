@@ -2,10 +2,14 @@
 from __future__ import annotations
 
 import argparse
+import base64
+import hashlib
+import hmac
 import json
 import mimetypes
 import os
 import sqlite3
+import time as time_module
 from datetime import datetime, timedelta, time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -18,6 +22,9 @@ DEFAULT_DB_PATH = ROOT / "todos.db"
 PRIORITY_WEIGHT = {"urgent": 4, "high": 3, "medium": 2, "low": 1}
 VALID_PRIORITIES = set(PRIORITY_WEIGHT)
 VALID_STATUS = {"pending", "completed"}
+SESSION_COOKIE = "puck_session"
+SESSION_TTL_SECONDS = 60 * 60 * 24 * 30
+PUBLIC_ASSET_PATHS = {"/login.html", "/style.css", "/app.js", "/markdown.js", "/favicon.svg"}
 
 
 def now_local() -> datetime:
@@ -40,6 +47,88 @@ def normalize(row: sqlite3.Row) -> dict[str, Any]:
     d = dict(row)
     d["priority_label"] = {"urgent": "紧急", "high": "高", "medium": "中", "low": "低"}.get(d["priority"], d["priority"])
     return d
+
+
+def b64url_encode(data: bytes) -> str:
+    return base64.urlsafe_b64encode(data).decode("ascii").rstrip("=")
+
+
+def b64url_decode(value: str) -> bytes:
+    padding = "=" * ((4 - len(value) % 4) % 4)
+    return base64.urlsafe_b64decode((value + padding).encode("ascii"))
+
+
+def has_auth_config() -> bool:
+    return bool(os.environ.get("ADMIN_EMAIL") and os.environ.get("ADMIN_PASSWORD_HASH") and os.environ.get("AUTH_SECRET"))
+
+
+def require_auth_config() -> None:
+    if not has_auth_config():
+        raise ValueError("登录配置未完成")
+
+
+def verify_password(password: str, password_hash: str) -> bool:
+    try:
+        scheme, iterations_value, salt_value, expected_value = password_hash.split("$", 3)
+        iterations = int(iterations_value)
+        if scheme != "pbkdf2_sha256" or iterations < 10000:
+            return False
+        actual = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), b64url_decode(salt_value), iterations, dklen=32)
+        return hmac.compare_digest(actual, b64url_decode(expected_value))
+    except Exception:
+        return False
+
+
+def sign_session_payload(payload: str, secret: str) -> str:
+    signature = hmac.new(secret.encode("utf-8"), payload.encode("utf-8"), hashlib.sha256).digest()
+    return b64url_encode(signature)
+
+
+def create_session_cookie(email: str, secret: str, secure: bool = False) -> str:
+    expires_at = int(time_module.time()) + SESSION_TTL_SECONDS
+    payload = b64url_encode(json.dumps({"email": email, "exp": expires_at}, separators=(",", ":")).encode("utf-8"))
+    token = f"{payload}.{sign_session_payload(payload, secret)}"
+    secure_flag = "; Secure" if secure else ""
+    return f"{SESSION_COOKIE}={token}; Path=/; HttpOnly; SameSite=Lax; Max-Age={SESSION_TTL_SECONDS}{secure_flag}"
+
+
+def clear_session_cookie() -> str:
+    return f"{SESSION_COOKIE}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0"
+
+
+def parse_cookie_header(header: str) -> dict[str, str]:
+    cookies: dict[str, str] = {}
+    for part in header.split(";"):
+        if "=" not in part:
+            continue
+        key, value = part.split("=", 1)
+        cookies[key.strip()] = value.strip()
+    return cookies
+
+
+def verify_session_token(token: str | None, secret: str) -> dict[str, Any] | None:
+    if not token or "." not in token:
+        return None
+    payload, signature = token.split(".", 1)
+    if not hmac.compare_digest(sign_session_payload(payload, secret), signature):
+        return None
+    try:
+        data = json.loads(b64url_decode(payload).decode("utf-8"))
+    except Exception:
+        return None
+    if not data.get("exp") or data["exp"] < int(time_module.time()):
+        return None
+    return data
+
+
+def session_user(cookie_header: str) -> dict[str, str] | None:
+    if not has_auth_config():
+        return None
+    cookies = parse_cookie_header(cookie_header)
+    data = verify_session_token(cookies.get(SESSION_COOKIE), os.environ["AUTH_SECRET"])
+    if not data or str(data.get("email", "")).lower() != os.environ["ADMIN_EMAIL"].lower():
+        return None
+    return {"email": os.environ["ADMIN_EMAIL"]}
 
 
 class TodoStore:
@@ -237,21 +326,61 @@ def make_handler(db_path: str):
         def log_message(self, fmt: str, *args: Any) -> None:
             print(f"[{self.log_date_time_string()}] {fmt % args}")
 
-        def send_json(self, data: Any, status: int = 200) -> None:
+        def send_json(self, data: Any, status: int = 200, headers: dict[str, str] | None = None) -> None:
             body = json.dumps(data, ensure_ascii=False).encode("utf-8")
             self.send_response(status)
             self.send_header("Content-Type", "application/json; charset=utf-8")
             self.send_header("Content-Length", str(len(body)))
             self.send_header("Cache-Control", "no-store")
+            for key, value in (headers or {}).items():
+                self.send_header(key, value)
             self.end_headers()
             self.wfile.write(body)
 
         def send_error_json(self, message: str, status: int = 400) -> None:
             self.send_json({"error": message}, status)
 
+        def redirect(self, location: str) -> None:
+            self.send_response(302)
+            self.send_header("Location", location)
+            self.send_header("Cache-Control", "no-store")
+            self.end_headers()
+
         def read_json(self) -> dict[str, Any]:
             length = int(self.headers.get("Content-Length", "0") or "0")
             return json.loads(self.rfile.read(length).decode("utf-8")) if length else {}
+
+        def current_user(self) -> dict[str, str] | None:
+            return session_user(self.headers.get("Cookie", ""))
+
+        def require_user(self) -> bool:
+            if self.current_user():
+                return True
+            self.send_error_json("请先登录", 401)
+            return False
+
+        def handle_auth_api(self, path: str) -> bool:
+            if self.command == "GET" and path == "/api/auth/status":
+                user = self.current_user()
+                self.send_json({"authenticated": bool(user), "email": user["email"] if user else None, "configured": has_auth_config()})
+                return True
+            if self.command == "POST" and path == "/api/auth/login":
+                require_auth_config()
+                payload = self.read_json()
+                email = str(payload.get("email", "")).strip().lower()
+                password = str(payload.get("password", ""))
+                valid_email = email == os.environ["ADMIN_EMAIL"].lower()
+                valid_password = verify_password(password, os.environ["ADMIN_PASSWORD_HASH"])
+                if not valid_email or not valid_password:
+                    self.send_error_json("账号或密码错误", 401)
+                    return True
+                cookie = create_session_cookie(os.environ["ADMIN_EMAIL"], os.environ["AUTH_SECRET"])
+                self.send_json({"ok": True}, headers={"Set-Cookie": cookie})
+                return True
+            if self.command == "POST" and path == "/api/auth/logout":
+                self.send_json({"ok": True}, headers={"Set-Cookie": clear_session_cookie()})
+                return True
+            return False
 
         def do_GET(self) -> None:
             parsed = urlparse(self.path)
@@ -259,6 +388,10 @@ def make_handler(db_path: str):
             try:
                 if parsed.path == "/api/health":
                     return self.send_json({"ok": True})
+                if parsed.path.startswith("/api/auth/") and self.handle_auth_api(parsed.path):
+                    return
+                if parsed.path.startswith("/api/") and not self.require_user():
+                    return
                 if parsed.path == "/api/todos":
                     month = qs.get("month", [datetime.now().strftime("%Y-%m")])[0]
                     return self.send_json(store.list_month(month))
@@ -276,6 +409,10 @@ def make_handler(db_path: str):
         def do_POST(self) -> None:
             path = urlparse(self.path).path
             try:
+                if path.startswith("/api/auth/") and self.handle_auth_api(path):
+                    return
+                if not self.require_user():
+                    return
                 if path == "/api/todos":
                     p = self.read_json()
                     return self.send_json(store.create_todo(p.get("title", ""), p.get("priority", "medium"), p.get("due_at", ""), p.get("note", "")))
@@ -292,6 +429,8 @@ def make_handler(db_path: str):
         def do_PATCH(self) -> None:
             path = urlparse(self.path).path
             try:
+                if not self.require_user():
+                    return
                 if path.startswith("/api/todos/"):
                     return self.send_json(store.update_todo(int(path.split("/")[3]), self.read_json()))
                 return self.send_error_json("Not found", 404)
@@ -303,6 +442,8 @@ def make_handler(db_path: str):
         def do_DELETE(self) -> None:
             path = urlparse(self.path).path
             try:
+                if not self.require_user():
+                    return
                 if path.startswith("/api/todos/"):
                     return self.send_json(store.delete_todo(int(path.split("/")[3])))
                 return self.send_error_json("Not found", 404)
@@ -312,6 +453,9 @@ def make_handler(db_path: str):
         def serve_static(self, path: str) -> None:
             if path == "/":
                 path = "/index.html"
+            if path not in PUBLIC_ASSET_PATHS and not self.current_user():
+                login_path = f"/login.html?next={path}"
+                return self.redirect(login_path)
             safe = Path(path.lstrip("/")).as_posix()
             if ".." in safe:
                 return self.send_error_json("Invalid path", 400)

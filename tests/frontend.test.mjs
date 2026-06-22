@@ -63,6 +63,28 @@ test('office UI keeps todos and notes on separate pages', async () => {
   assert.doesNotMatch(style, /notes-drawer|finder-body|drawer-collapsed|finder-workspace|note-actions|note-editor|note-item-actions/);
 });
 
+test('office UI includes login page and logout controls', async () => {
+  const [homeHtml, notesHtml, loginHtml, app, style] = await Promise.all([
+    readFile(new URL('../static/index.html', import.meta.url), 'utf8'),
+    readFile(new URL('../static/notes.html', import.meta.url), 'utf8'),
+    readFile(new URL('../static/login.html', import.meta.url), 'utf8'),
+    readFile(new URL('../static/app.js', import.meta.url), 'utf8'),
+    readFile(new URL('../static/style.css', import.meta.url), 'utf8')
+  ]);
+
+  assert.match(loginHtml, /data-page="login"/);
+  assert.match(loginHtml, /id="loginForm"/);
+  assert.match(loginHtml, /id="emailInput"/);
+  assert.match(loginHtml, /id="passwordInput"/);
+  assert.match(homeHtml, /id="logoutButton"/);
+  assert.match(notesHtml, /id="logoutButton"/);
+  assert.match(app, /initLoginPage/);
+  assert.match(app, /\/api\/auth\/login/);
+  assert.match(app, /\/api\/auth\/logout/);
+  assert.match(style, /\.login-shell/);
+  assert.match(style, /\.logout-btn/);
+});
+
 test('todo add and delete interactions use transitions with operation lockout', async () => {
   const [app, style] = await Promise.all([
     readFile(new URL('../static/app.js', import.meta.url), 'utf8'),

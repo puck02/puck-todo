@@ -8,6 +8,13 @@
     "directory": "./static",
     "binding": "ASSETS"
   },
+  "secrets": {
+    "required": [
+      "ADMIN_EMAIL",
+      "ADMIN_PASSWORD_HASH",
+      "AUTH_SECRET"
+    ]
+  },
   "d1_databases": [
     {
       "binding": "DB",

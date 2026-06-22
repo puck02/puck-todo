@@ -39,6 +39,10 @@ body {
   letter-spacing: 0;
 }
 
+body[data-page="login"] {
+  padding-top: 0;
+}
+
 button,
 input,
 select,
@@ -145,10 +149,48 @@ a:focus-visible {
   background: var(--ink);
 }
 
+.logout-btn {
+  height: 38px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 0 14px;
+  background: rgba(255, 253, 248, 0.84);
+  color: var(--ink);
+  font-weight: 680;
+  transition: background .18s ease, border-color .18s ease, transform .18s ease;
+}
+
+.logout-btn:hover {
+  background: #fffefb;
+  border-color: var(--line-strong);
+  transform: translateY(-1px);
+}
+
 .shell {
   width: min(1180px, calc(100vw - 40px));
   margin: 0 auto;
   padding: 32px 0 72px;
+}
+
+.login-shell {
+  width: min(420px, calc(100vw - 32px));
+  min-height: 100vh;
+  margin: 0 auto;
+  display: grid;
+  place-items: center;
+  padding: 40px 0;
+}
+
+.login-panel {
+  width: 100%;
+  padding: 28px;
+  display: grid;
+  gap: 24px;
+}
+
+.login-form {
+  display: grid;
+  gap: 14px;
 }
 
 body[data-page="notes"] .shell {
@@ -1349,6 +1391,15 @@ textarea:disabled {
   .main-nav a {
     min-width: 0;
     padding: 7px 11px;
+  }
+
+  .logout-btn {
+    width: 100%;
+  }
+
+  .login-shell {
+    width: min(100vw - 18px, 480px);
+    padding-top: 18px;
   }
 
   .shell {

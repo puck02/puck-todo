@@ -2,6 +2,10 @@ const PRIORITY_WEIGHT = { urgent: 4, high: 3, medium: 2, low: 1 };
 const VALID_PRIORITIES = new Set(Object.keys(PRIORITY_WEIGHT));
 const VALID_STATUS = new Set(['pending', 'completed']);
 const VALID_NOTE_TYPES = new Set(['file', 'folder']);
+const SESSION_COOKIE = 'puck_session';
+const SESSION_TTL_SECONDS = 60 * 60 * 24 * 30;
+const PUBLIC_ASSET_PATHS = new Set(['/login.html', '/style.css', '/app.js', '/markdown.js', '/favicon.svg']);
+const encoder = new TextEncoder();
 
 class HttpError extends Error {
   constructor(message, status = 400) {
@@ -14,13 +18,119 @@ function nowIso() {
   return new Date().toISOString().replace(/\.\d{3}Z$/, '');
 }
 
-function json(data, status = 200) {
+function json(data, status = 200, headers = {}) {
   return Response.json(data, {
     status,
     headers: {
-      'Cache-Control': 'no-store'
+      'Cache-Control': 'no-store',
+      ...headers
     }
   });
+}
+
+function bytesToBase64Url(bytes) {
+  let binary = '';
+  for (const byte of bytes) binary += String.fromCharCode(byte);
+  return btoa(binary).replace(/=/g, '').replace(/\+/g, '-').replace(/\//g, '_');
+}
+
+function base64UrlToBytes(value) {
+  const normalized = value.replace(/-/g, '+').replace(/_/g, '/');
+  const padded = normalized.padEnd(normalized.length + (4 - normalized.length % 4) % 4, '=');
+  const binary = atob(padded);
+  return Uint8Array.from(binary, (char) => char.charCodeAt(0));
+}
+
+function timingSafeEqual(left, right) {
+  const maxLength = Math.max(left.length, right.length);
+  let diff = left.length ^ right.length;
+  for (let i = 0; i < maxLength; i += 1) {
+    diff |= (left[i] || 0) ^ (right[i] || 0);
+  }
+  return diff === 0;
+}
+
+function parseCookies(header = '') {
+  const cookies = new Map();
+  for (const part of header.split(';')) {
+    const index = part.indexOf('=');
+    if (index === -1) continue;
+    cookies.set(part.slice(0, index).trim(), part.slice(index + 1).trim());
+  }
+  return cookies;
+}
+
+function hasAuthConfig(env) {
+  return Boolean(env.ADMIN_EMAIL && env.ADMIN_PASSWORD_HASH && env.AUTH_SECRET);
+}
+
+function requireAuthConfig(env) {
+  if (!hasAuthConfig(env)) throw new HttpError('登录配置未完成', 500);
+}
+
+async function hmacKey(secret) {
+  return crypto.subtle.importKey('raw', encoder.encode(secret), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign', 'verify']);
+}
+
+async function signSessionPayload(payload, secret) {
+  const signature = await crypto.subtle.sign('HMAC', await hmacKey(secret), encoder.encode(payload));
+  return bytesToBase64Url(new Uint8Array(signature));
+}
+
+async function verifySessionToken(token, secret) {
+  const [payload, signature] = String(token || '').split('.');
+  if (!payload || !signature) return null;
+  try {
+    const valid = await crypto.subtle.verify(
+      'HMAC',
+      await hmacKey(secret),
+      base64UrlToBytes(signature),
+      encoder.encode(payload)
+    );
+    if (!valid) return null;
+    const data = JSON.parse(new TextDecoder().decode(base64UrlToBytes(payload)));
+    if (!data.exp || data.exp < Math.floor(Date.now() / 1000)) return null;
+    return data;
+  } catch {
+    return null;
+  }
+}
+
+async function createSessionCookie(email, secret, url) {
+  const expiresAt = Math.floor(Date.now() / 1000) + SESSION_TTL_SECONDS;
+  const payload = bytesToBase64Url(encoder.encode(JSON.stringify({ email, exp: expiresAt })));
+  const signature = await signSessionPayload(payload, secret);
+  const secure = url.protocol === 'https:' ? '; Secure' : '';
+  return `${SESSION_COOKIE}=${payload}.${signature}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${SESSION_TTL_SECONDS}${secure}`;
+}
+
+function clearSessionCookie() {
+  return `${SESSION_COOKIE}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0`;
+}
+
+async function getSessionUser(request, env) {
+  if (!hasAuthConfig(env)) return null;
+  const cookies = parseCookies(request.headers.get('Cookie') || '');
+  const session = await verifySessionToken(cookies.get(SESSION_COOKIE), env.AUTH_SECRET);
+  if (!session || String(session.email).toLowerCase() !== String(env.ADMIN_EMAIL).toLowerCase()) return null;
+  return { email: env.ADMIN_EMAIL };
+}
+
+async function verifyPassword(password, passwordHash) {
+  const [scheme, iterationsValue, saltValue, expectedValue] = String(passwordHash || '').split('$');
+  const iterations = Number(iterationsValue);
+  if (scheme !== 'pbkdf2_sha256' || !Number.isInteger(iterations) || iterations < 10000 || !saltValue || !expectedValue) return false;
+  try {
+    const key = await crypto.subtle.importKey('raw', encoder.encode(password), 'PBKDF2', false, ['deriveBits']);
+    const bits = await crypto.subtle.deriveBits(
+      { name: 'PBKDF2', hash: 'SHA-256', salt: base64UrlToBytes(saltValue), iterations },
+      key,
+      256
+    );
+    return timingSafeEqual(new Uint8Array(bits), base64UrlToBytes(expectedValue));
+  } catch {
+    return false;
+  }
 }
 
 function normalizeTodo(row) {
@@ -233,15 +343,46 @@ async function deleteNote(db, id) {
   return { ok: result.meta.changes > 0 };
 }
 
-async function handleApi(request, env) {
-  if (!env.DB) throw new HttpError('D1 数据库未绑定', 500);
+async function handleAuthApi(request, env, url) {
+  const path = url.pathname;
+  const method = request.method;
 
+  if (method === 'GET' && path === '/api/auth/status') {
+    const user = await getSessionUser(request, env);
+    return json({ authenticated: Boolean(user), email: user?.email || null, configured: hasAuthConfig(env) });
+  }
+
+  if (method === 'POST' && path === '/api/auth/login') {
+    requireAuthConfig(env);
+    const payload = await readJson(request);
+    const email = String(payload.email || '').trim().toLowerCase();
+    const password = String(payload.password || '');
+    const validEmail = email === String(env.ADMIN_EMAIL).toLowerCase();
+    const validPassword = await verifyPassword(password, env.ADMIN_PASSWORD_HASH);
+    if (!validEmail || !validPassword) throw new HttpError('账号或密码错误', 401);
+    const cookie = await createSessionCookie(env.ADMIN_EMAIL, env.AUTH_SECRET, url);
+    return json({ ok: true }, 200, { 'Set-Cookie': cookie });
+  }
+
+  if (method === 'POST' && path === '/api/auth/logout') {
+    return json({ ok: true }, 200, { 'Set-Cookie': clearSessionCookie() });
+  }
+
+  throw new HttpError('Not found', 404);
+}
+
+async function handleApi(request, env) {
   const url = new URL(request.url);
   const path = url.pathname;
   const method = request.method;
   const parts = path.split('/').filter(Boolean);
 
   if (method === 'GET' && path === '/api/health') return json({ ok: true });
+  if (path.startsWith('/api/auth/')) return await handleAuthApi(request, env, url);
+
+  const user = await getSessionUser(request, env);
+  if (!user) throw new HttpError('请先登录', 401);
+  if (!env.DB) throw new HttpError('D1 数据库未绑定', 500);
 
   if (parts[1] === 'todos') {
     if (method === 'GET' && parts.length === 2) {
@@ -276,13 +417,29 @@ async function handleApi(request, env) {
   throw new HttpError('Not found', 404);
 }
 
+function isPublicAsset(path) {
+  return PUBLIC_ASSET_PATHS.has(path);
+}
+
+async function serveAsset(request, env, url) {
+  if (!env.ASSETS) return new Response('Not found', { status: 404 });
+  if (isPublicAsset(url.pathname)) return env.ASSETS.fetch(request);
+  const user = await getSessionUser(request, env);
+  if (user) {
+    if (url.pathname === '/login.html') return Response.redirect(new URL('/', url), 302);
+    return env.ASSETS.fetch(request);
+  }
+  const loginUrl = new URL('/login.html', url);
+  loginUrl.searchParams.set('next', `${url.pathname}${url.search}`);
+  return Response.redirect(loginUrl, 302);
+}
+
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
     try {
       if (url.pathname.startsWith('/api/')) return await handleApi(request, env);
-      if (env.ASSETS) return env.ASSETS.fetch(request);
-      return new Response('Not found', { status: 404 });
+      return await serveAsset(request, env, url);
     } catch (error) {
       const status = error instanceof HttpError ? error.status : 500;
       console.error(JSON.stringify({ message: 'request failed', path: url.pathname, status, error: error.message }));

@@ -84,14 +84,26 @@ class TodoCoreTests(unittest.TestCase):
 
         later = self.store.create_countdown("旅行", "2026-07-01")
         earlier = self.store.create_countdown("生日", "2026-06-01")
+        monthly = self.store.create_countdown("发工资", "", event_type="monthly", repeat_day=15)
+        anniversary = self.store.create_countdown("第一次接吻", "2024-05-20", event_type="anniversary")
+
+        self.assertEqual(monthly["event_type"], "monthly")
+        self.assertEqual(monthly["repeat_day"], 15)
+        self.assertIsNone(monthly["repeat_month"])
+        self.assertEqual(anniversary["event_type"], "anniversary")
+        self.assertEqual(anniversary["repeat_month"], 5)
+        self.assertEqual(anniversary["repeat_day"], 20)
+
+        with self.assertRaises(ValueError):
+            self.store.create_countdown("错误频次", "", event_type="monthly", repeat_day=32)
 
         listed = self.store.list_countdowns()
-        self.assertEqual([item["title"] for item in listed["countdowns"]], ["生日", "旅行"])
+        self.assertEqual(sorted(item["title"] for item in listed["countdowns"]), ["发工资", "旅行", "生日", "第一次接吻"])
 
         deleted = self.store.delete_countdown(later["id"])
         self.assertEqual(deleted, {"ok": True})
         after_delete = self.store.list_countdowns()
-        self.assertEqual([item["id"] for item in after_delete["countdowns"]], [earlier["id"]])
+        self.assertEqual(sorted(item["title"] for item in after_delete["countdowns"]), ["发工资", "生日", "第一次接吻"])
 
 
 if __name__ == "__main__":

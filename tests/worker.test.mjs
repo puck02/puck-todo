@@ -127,9 +127,9 @@ class FakeStatement {
       return { meta: { last_row_id: id, changes: 1 } };
     }
     if (sql.startsWith('INSERT INTO countdowns')) {
-      const [title, target_date, now] = this.params;
+      const [title, target_date, event_type = 'once', repeat_month = null, repeat_day = null, now] = this.params;
       const id = this.db.nextCountdownId++;
-      this.db.countdowns.push({ id, title, target_date, created_at: now, updated_at: now });
+      this.db.countdowns.push({ id, title, target_date, event_type, repeat_month, repeat_day, created_at: now, updated_at: now });
       return { meta: { last_row_id: id, changes: 1 } };
     }
     if (sql.startsWith('DELETE FROM notes WHERE id IN')) {
@@ -338,16 +338,43 @@ test('Worker countdown API creates lists validates and deletes events', async ()
   assert.equal(created.res.status, 201);
   assert.equal(created.body.title, '旅行');
   assert.equal(created.body.target_date, '2026-07-01');
+  assert.equal(created.body.event_type, 'once');
+  assert.equal(created.body.repeat_month, null);
+  assert.equal(created.body.repeat_day, null);
+
+  const monthly = await authenticatedRequest(db, '/api/countdowns', {
+    method: 'POST',
+    body: JSON.stringify({ title: '发工资', event_type: 'monthly', repeat_day: 15 })
+  });
+  assert.equal(monthly.res.status, 201);
+  assert.equal(monthly.body.event_type, 'monthly');
+  assert.equal(monthly.body.repeat_day, 15);
+  assert.equal(monthly.body.repeat_month, null);
+
+  const anniversary = await authenticatedRequest(db, '/api/countdowns', {
+    method: 'POST',
+    body: JSON.stringify({ title: '第一次接吻', event_type: 'anniversary', target_date: '2024-05-20' })
+  });
+  assert.equal(anniversary.res.status, 201);
+  assert.equal(anniversary.body.event_type, 'anniversary');
+  assert.equal(anniversary.body.repeat_month, 5);
+  assert.equal(anniversary.body.repeat_day, 20);
+
+  const invalidMonthly = await authenticatedRequest(db, '/api/countdowns', {
+    method: 'POST',
+    body: JSON.stringify({ title: '错误频次', event_type: 'monthly', repeat_day: 32 })
+  });
+  assert.equal(invalidMonthly.res.status, 400);
 
   const listed = await authenticatedRequest(db, '/api/countdowns');
-  assert.deepEqual(listed.body.countdowns.map((item) => item.title), ['旅行']);
+  assert.deepEqual(listed.body.countdowns.map((item) => item.title).sort(), ['发工资', '旅行', '第一次接吻'].sort());
 
   const deleted = await authenticatedRequest(db, `/api/countdowns/${created.body.id}`, { method: 'DELETE' });
   assert.equal(deleted.res.status, 200);
   assert.equal(deleted.body.ok, true);
 
   const afterDelete = await authenticatedRequest(db, '/api/countdowns');
-  assert.deepEqual(afterDelete.body.countdowns, []);
+  assert.deepEqual(afterDelete.body.countdowns.map((item) => item.title).sort(), ['发工资', '第一次接吻'].sort());
 });
 
 test('Worker notes API supports nested folders and files', async () => {

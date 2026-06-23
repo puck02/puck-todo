@@ -65,11 +65,91 @@ function todayDateString() {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
 
-function countdownStatus(item) {
-  const diff = Math.round((localDateFromString(item.target_date) - todayLocalDate()) / 86400000);
+function daysInMonth(year, month) {
+  return new Date(year, month, 0).getDate();
+}
+
+function dateStringFromLocalDate(date) {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+}
+
+function calendarDayDiff(targetDate) {
+  return Math.round((targetDate - todayLocalDate()) / 86400000);
+}
+
+function onceCountdownStatus(item) {
+  const diff = calendarDayDiff(localDateFromString(item.target_date));
   if (diff > 0) return { label: `还有 ${diff} 天`, caption: '还有', value: String(diff), suffix: '天', kind: 'future' };
   if (diff < 0) return { label: `已过去 ${Math.abs(diff)} 天`, caption: '已过去', value: String(Math.abs(diff)), suffix: '天', kind: 'past' };
   return { label: '今天', caption: '', value: '今天', suffix: '', kind: 'today' };
+}
+
+function monthlyNextDate(repeatDay) {
+  const today = todayLocalDate();
+  let year = today.getFullYear();
+  let month = today.getMonth() + 1;
+  let day = Math.min(repeatDay, daysInMonth(year, month));
+  let next = new Date(year, month - 1, day);
+  if (next < today) {
+    month += 1;
+    if (month > 12) {
+      month = 1;
+      year += 1;
+    }
+    day = Math.min(repeatDay, daysInMonth(year, month));
+    next = new Date(year, month - 1, day);
+  }
+  return next;
+}
+
+function monthlyCountdownStatus(item) {
+  const repeatDay = Number(item.repeat_day || localDateFromString(item.target_date).getDate());
+  const next = monthlyNextDate(repeatDay);
+  const diff = calendarDayDiff(next);
+  const label = diff === 0 ? '今天' : `还有 ${diff} 天`;
+  return {
+    label,
+    caption: diff === 0 ? '' : '还有',
+    value: diff === 0 ? '今天' : String(diff),
+    suffix: diff === 0 ? '' : '天',
+    extra: `每月 ${repeatDay} 日`,
+    kind: diff === 0 ? 'today' : 'future'
+  };
+}
+
+function anniversaryCountdownStatus(item) {
+  const start = localDateFromString(item.target_date);
+  const today = todayLocalDate();
+  let year = today.getFullYear();
+  const month = Number(item.repeat_month || start.getMonth() + 1);
+  const originalDay = Number(item.repeat_day || start.getDate());
+  let day = Math.min(originalDay, daysInMonth(year, month));
+  let next = new Date(year, month - 1, day);
+  if (next < today) {
+    year += 1;
+    day = Math.min(originalDay, daysInMonth(year, month));
+    next = new Date(year, month - 1, day);
+  }
+  const totalDays = Math.abs(calendarDayDiff(start));
+  const anniversaryYears = Math.max(1, year - start.getFullYear());
+  const anniversaryDiff = calendarDayDiff(next);
+  const extra = anniversaryDiff === 0
+    ? `今天是 ${anniversaryYears} 周年`
+    : `离 ${anniversaryYears} 周年还有 ${anniversaryDiff} 天`;
+  return {
+    label: totalDays === 0 ? '今天' : `已过去 ${totalDays} 天`,
+    caption: totalDays === 0 ? '' : '已过去',
+    value: totalDays === 0 ? '今天' : String(totalDays),
+    suffix: totalDays === 0 ? '' : '天',
+    extra,
+    kind: totalDays === 0 ? 'today' : 'past'
+  };
+}
+
+function countdownStatus(item) {
+  if (item.event_type === 'monthly') return monthlyCountdownStatus(item);
+  if (item.event_type === 'anniversary') return anniversaryCountdownStatus(item);
+  return onceCountdownStatus(item);
 }
 
 function renderTodoNote(note) {
@@ -447,7 +527,11 @@ function initCountdownsPage() {
   const COUNTDOWN_TRANSITION_MS = 220;
   const countdownForm = $('countdownForm');
   const titleInput = $('countdownTitleInput');
+  const typeInput = $('countdownTypeInput');
   const dateInput = $('countdownDateInput');
+  const dayInput = $('countdownDayInput');
+  const dateField = document.querySelector('.countdown-date-field');
+  const dayField = document.querySelector('.countdown-day-field');
   const countdownsMeta = $('countdownsMeta');
   const countdownsList = $('countdownsList');
 
@@ -458,7 +542,7 @@ function initCountdownsPage() {
   function syncCountdownBusyControls() {
     document.body.classList.toggle('countdown-locked', state.busy);
     document.body.setAttribute('aria-busy', String(state.busy));
-    for (const el of document.querySelectorAll('body[data-page="countdowns"] button, body[data-page="countdowns"] input')) {
+    for (const el of document.querySelectorAll('body[data-page="countdowns"] button, body[data-page="countdowns"] input, body[data-page="countdowns"] select')) {
       el.disabled = state.busy;
     }
   }
@@ -481,6 +565,9 @@ function initCountdownsPage() {
       id: `temp-${Date.now()}-${state.nextTempId++}`,
       title: payload.title.trim(),
       target_date: payload.target_date,
+      event_type: payload.event_type || 'once',
+      repeat_month: payload.repeat_month ?? null,
+      repeat_day: payload.repeat_day ?? null,
       created_at: now,
       updated_at: now,
       __entering: true,
@@ -541,6 +628,12 @@ function initCountdownsPage() {
       date.className = 'countdown-date';
       date.textContent = formatDateText(item.target_date);
       main.append(title, date);
+      if (status.extra) {
+        const extra = document.createElement('p');
+        extra.className = 'countdown-extra';
+        extra.textContent = status.extra;
+        main.appendChild(extra);
+      }
 
       const statusBlock = document.createElement('div');
       statusBlock.className = 'countdown-status';
@@ -602,17 +695,43 @@ function initCountdownsPage() {
     renderCountdowns();
   }
 
+  function syncCountdownTypeFields() {
+    const type = typeInput.value;
+    const monthly = type === 'monthly';
+    dateField.classList.toggle('countdown-field-hidden', monthly);
+    dayField.classList.toggle('countdown-field-hidden', !monthly);
+    dateInput.required = !monthly;
+    dayInput.required = monthly;
+  }
+
+  function countdownPayload() {
+    const event_type = typeInput.value || 'once';
+    const payload = {
+      title: titleInput.value,
+      event_type,
+      target_date: dateInput.value
+    };
+    if (event_type === 'monthly') {
+      payload.target_date = dateInput.value || todayDateString();
+      payload.repeat_day = Number(dayInput.value);
+    }
+    if (event_type === 'anniversary' && dateInput.value) {
+      const [, month, day] = dateInput.value.split('-').map(Number);
+      payload.repeat_month = month;
+      payload.repeat_day = day;
+    }
+    return payload;
+  }
+
   countdownForm.addEventListener('submit', async (event) => {
     event.preventDefault();
     if (state.busy) return;
-    const payload = {
-      title: titleInput.value,
-      target_date: dateInput.value
-    };
+    const payload = countdownPayload();
     const previous = [...state.countdowns];
     setCountdownOperationBusy(true);
     const optimistic = addOptimisticCountdown(payload);
     titleInput.value = '';
+    if (payload.event_type === 'monthly') dayInput.value = '';
     try {
       const created = await request('/api/countdowns', { method: 'POST', body: JSON.stringify(payload) });
       replaceOptimisticCountdown(optimistic.id, created);
@@ -620,6 +739,7 @@ function initCountdownsPage() {
     } catch (err) {
       state.countdowns = previous;
       titleInput.value = payload.title;
+      if (payload.event_type === 'monthly') dayInput.value = payload.repeat_day || '';
       renderCountdowns();
       toast(err.message);
     } finally {
@@ -627,7 +747,9 @@ function initCountdownsPage() {
     }
   });
 
+  typeInput.addEventListener('change', syncCountdownTypeFields);
   dateInput.value = todayDateString();
+  syncCountdownTypeFields();
   loadCountdowns().catch(err => toast(err.message));
 }
 

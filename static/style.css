@@ -514,7 +514,15 @@ textarea:disabled {
 }
 
 .countdown-form {
-  grid-template-columns: minmax(220px, 1fr) minmax(180px, 230px) 106px;
+  grid-template-columns: minmax(220px, 1fr) minmax(112px, 140px) minmax(180px, 220px) 106px;
+}
+
+.countdown-day-field {
+  grid-column: 3;
+}
+
+.countdown-field-hidden {
+  display: none;
 }
 
 .countdown-panel {
@@ -586,6 +594,15 @@ textarea:disabled {
   margin: 0;
   color: var(--muted);
   font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.countdown-extra {
+  margin: 0;
+  color: var(--accent);
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.4;
   font-variant-numeric: tabular-nums;
 }
 
@@ -1406,6 +1423,7 @@ textarea:disabled {
 
   .note-field,
   .countdown-date-field,
+  .countdown-day-field,
   .edit-form .note-field,
   .edit-actions {
     grid-column: auto;

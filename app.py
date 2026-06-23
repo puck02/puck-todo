@@ -22,6 +22,7 @@ DEFAULT_DB_PATH = ROOT / "todos.db"
 PRIORITY_WEIGHT = {"urgent": 4, "high": 3, "medium": 2, "low": 1}
 VALID_PRIORITIES = set(PRIORITY_WEIGHT)
 VALID_STATUS = {"pending", "completed"}
+VALID_COUNTDOWN_TYPES = {"once", "monthly", "anniversary"}
 DATE_FORMAT = "%Y-%m-%d"
 SESSION_COOKIE = "puck_session"
 SESSION_TTL_SECONDS = 60 * 60 * 24 * 30
@@ -47,6 +48,18 @@ def month_range(month: str) -> tuple[str, str]:
 
 def parse_date(value: str) -> str:
     return datetime.strptime(value, DATE_FORMAT).strftime(DATE_FORMAT)
+
+
+def days_in_month(year: int, month: int) -> int:
+    if month == 12:
+        next_month = datetime(year + 1, 1, 1)
+    else:
+        next_month = datetime(year, month + 1, 1)
+    return (next_month - timedelta(days=1)).day
+
+
+def date_string(year: int, month: int, day: int) -> str:
+    return f"{year:04d}-{month:02d}-{day:02d}"
 
 
 def normalize(row: sqlite3.Row) -> dict[str, Any]:
@@ -195,10 +208,20 @@ class TodoStore:
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     title TEXT NOT NULL,
                     target_date TEXT NOT NULL,
+                    event_type TEXT NOT NULL DEFAULT 'once',
+                    repeat_month INTEGER,
+                    repeat_day INTEGER,
                     created_at TEXT NOT NULL,
                     updated_at TEXT NOT NULL
                 )
             """)
+            countdown_columns = {row[1] for row in conn.execute("PRAGMA table_info(countdowns)").fetchall()}
+            if "event_type" not in countdown_columns:
+                conn.execute("ALTER TABLE countdowns ADD COLUMN event_type TEXT NOT NULL DEFAULT 'once'")
+            if "repeat_month" not in countdown_columns:
+                conn.execute("ALTER TABLE countdowns ADD COLUMN repeat_month INTEGER")
+            if "repeat_day" not in countdown_columns:
+                conn.execute("ALTER TABLE countdowns ADD COLUMN repeat_day INTEGER")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_countdowns_target_date ON countdowns(target_date)")
             conn.commit()
 
@@ -353,16 +376,41 @@ class TodoStore:
             conn.commit()
         return {"generated_at": now.isoformat(), "window_minutes": window_minutes, "items": items}
 
-    def create_countdown(self, title: str, target_date: str) -> dict[str, Any]:
+    def create_countdown(
+        self,
+        title: str,
+        target_date: str,
+        event_type: str = "once",
+        repeat_month: int | None = None,
+        repeat_day: int | None = None,
+    ) -> dict[str, Any]:
         title = (title or "").strip()
         if not title:
             raise ValueError("事件名称不能为空")
-        target_date = parse_date(str(target_date or ""))
+        event_type = event_type or "once"
+        if event_type not in VALID_COUNTDOWN_TYPES:
+            raise ValueError("事件类型不合法")
+        if event_type == "once":
+            target_date = parse_date(str(target_date or ""))
+            repeat_month = None
+            repeat_day = None
+        elif event_type == "monthly":
+            repeat_day = int(repeat_day or 0)
+            if repeat_day < 1 or repeat_day > 31:
+                raise ValueError("每月日期必须是 1-31")
+            now = now_local()
+            target_date = date_string(now.year, now.month, min(repeat_day, days_in_month(now.year, now.month)))
+            repeat_month = None
+        else:
+            target_date = parse_date(str(target_date or ""))
+            parsed = datetime.strptime(target_date, DATE_FORMAT)
+            repeat_month = parsed.month
+            repeat_day = parsed.day
         now = now_local().isoformat()
         with self.connect() as conn:
             cur = conn.execute(
-                "INSERT INTO countdowns (title, target_date, created_at, updated_at) VALUES (?, ?, ?, ?)",
-                (title, target_date, now, now),
+                "INSERT INTO countdowns (title, target_date, event_type, repeat_month, repeat_day, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (title, target_date, event_type, repeat_month, repeat_day, now, now),
             )
             conn.commit()
             return self.get_countdown(cur.lastrowid)
@@ -490,7 +538,13 @@ def make_handler(db_path: str):
                     return self.send_json(store.create_todo(p.get("title", ""), p.get("priority", "medium"), p.get("due_at", ""), p.get("note", "")))
                 if path == "/api/countdowns":
                     p = self.read_json()
-                    return self.send_json(store.create_countdown(p.get("title", ""), p.get("target_date", "")), 201)
+                    return self.send_json(store.create_countdown(
+                        p.get("title", ""),
+                        p.get("target_date", ""),
+                        p.get("event_type", "once"),
+                        p.get("repeat_month"),
+                        p.get("repeat_day"),
+                    ), 201)
                 if path.startswith("/api/todos/") and path.endswith("/complete"):
                     return self.send_json(store.complete_todo(int(path.split("/")[3])))
                 if path.startswith("/api/todos/") and path.endswith("/uncomplete"):

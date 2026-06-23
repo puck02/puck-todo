@@ -103,16 +103,26 @@ test('office UI includes a countdown page', async () => {
   assert.match(countdownHtml, /id="logoutButton"/);
   assert.match(countdownHtml, /id="countdownForm"/);
   assert.match(countdownHtml, /id="countdownTitleInput"/);
+  assert.match(countdownHtml, /id="countdownTypeInput"/);
   assert.match(countdownHtml, /id="countdownDateInput"/);
+  assert.match(countdownHtml, /id="countdownDayInput"/);
+  assert.match(countdownHtml, /value="monthly"/);
+  assert.match(countdownHtml, /value="anniversary"/);
   assert.match(countdownHtml, /id="countdownsMeta"/);
   assert.match(countdownHtml, /id="countdownsList"/);
   assert.match(countdownHtml, /type="module"/);
 
   assert.match(app, /initCountdownsPage/);
   assert.match(app, /\/api\/countdowns/);
+  assert.match(app, /monthlyCountdownStatus/);
+  assert.match(app, /anniversaryCountdownStatus/);
+  assert.match(app, /event_type/);
   assert.match(app, /还有/);
   assert.match(app, /已过去/);
+  assert.match(app, /周年/);
   assert.match(app, /今天/);
+  assert.match(style, /\.countdown-extra/);
+  assert.match(style, /\.countdown-field-hidden/);
   assert.match(style, /\.countdown-grid/);
   assert.match(style, /\.countdown-card/);
   assert.match(style, /\.countdown-value/);

@@ -40,9 +40,21 @@
           <span>事件</span>
           <input id="countdownTitleInput" type="text" maxlength="120" placeholder="旅行出发" required />
         </label>
+        <label class="field countdown-type-field">
+          <span>类型</span>
+          <select id="countdownTypeInput">
+            <option value="once" selected>一次性</option>
+            <option value="monthly">每月</option>
+            <option value="anniversary">周年</option>
+          </select>
+        </label>
         <label class="field countdown-date-field">
           <span>日期</span>
           <input id="countdownDateInput" type="date" required />
+        </label>
+        <label class="field countdown-day-field countdown-field-hidden">
+          <span>每月几号</span>
+          <input id="countdownDayInput" type="number" min="1" max="31" inputmode="numeric" placeholder="15" />
         </label>
         <button class="primary-btn" type="submit">添加</button>
       </form>

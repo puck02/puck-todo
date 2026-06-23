@@ -2,6 +2,7 @@ const PRIORITY_WEIGHT = { urgent: 4, high: 3, medium: 2, low: 1 };
 const VALID_PRIORITIES = new Set(Object.keys(PRIORITY_WEIGHT));
 const VALID_STATUS = new Set(['pending', 'completed']);
 const VALID_NOTE_TYPES = new Set(['file', 'folder']);
+const VALID_COUNTDOWN_TYPES = new Set(['once', 'monthly', 'anniversary']);
 const SESSION_COOKIE = 'puck_session';
 const SESSION_TTL_SECONDS = 60 * 60 * 24 * 30;
 const LOGIN_ASSET_PATHS = new Set(['/login', '/login.html']);
@@ -160,7 +161,10 @@ function normalizeNote(row) {
 function normalizeCountdown(row) {
   return {
     ...row,
-    target_date: String(row.target_date || '').slice(0, 10)
+    event_type: row.event_type || 'once',
+    target_date: String(row.target_date || '').slice(0, 10),
+    repeat_month: row.repeat_month ?? null,
+    repeat_day: row.repeat_day ?? null
   };
 }
 
@@ -240,12 +244,47 @@ function isValidDateString(value) {
     date.getUTCDate() === day;
 }
 
+function daysInMonth(year, month) {
+  return new Date(Date.UTC(year, month, 0)).getUTCDate();
+}
+
+function clampDay(year, month, day) {
+  return Math.min(day, daysInMonth(year, month));
+}
+
+function dateStringFromParts(year, month, day) {
+  return `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+}
+
 function validateCountdownPayload(payload) {
   const title = String(payload.title || '').trim();
-  const target_date = String(payload.target_date || '').trim();
+  const event_type = String(payload.event_type || 'once').trim();
+  let target_date = String(payload.target_date || '').trim();
+  let repeat_month = payload.repeat_month ?? null;
+  let repeat_day = payload.repeat_day ?? null;
+
   if (!title) throw new HttpError('事件名称不能为空');
+  if (!VALID_COUNTDOWN_TYPES.has(event_type)) throw new HttpError('事件类型不合法');
+
+  if (event_type === 'once') {
+    if (!isValidDateString(target_date)) throw new HttpError('日期格式必须是 YYYY-MM-DD');
+    return { title, target_date, event_type, repeat_month: null, repeat_day: null };
+  }
+
+  if (event_type === 'monthly') {
+    repeat_day = Number(repeat_day);
+    if (!Number.isInteger(repeat_day) || repeat_day < 1 || repeat_day > 31) throw new HttpError('每月日期必须是 1-31');
+    const now = new Date();
+    const month = now.getUTCMonth() + 1;
+    target_date = dateStringFromParts(now.getUTCFullYear(), month, clampDay(now.getUTCFullYear(), month, repeat_day));
+    return { title, target_date, event_type, repeat_month: null, repeat_day };
+  }
+
   if (!isValidDateString(target_date)) throw new HttpError('日期格式必须是 YYYY-MM-DD');
-  return { title, target_date };
+  const [year, month, day] = target_date.split('-').map(Number);
+  repeat_month = month;
+  repeat_day = day;
+  return { title, target_date, event_type, repeat_month, repeat_day };
 }
 
 async function getTodo(db, id) {
@@ -389,7 +428,7 @@ async function listCountdowns(db) {
 async function createCountdown(db, payload) {
   const data = validateCountdownPayload(payload);
   const now = nowIso();
-  const result = await db.prepare('INSERT INTO countdowns (title, target_date, created_at, updated_at) VALUES (?, ?, ?, ?)').bind(data.title, data.target_date, now, now).run();
+  const result = await db.prepare('INSERT INTO countdowns (title, target_date, event_type, repeat_month, repeat_day, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)').bind(data.title, data.target_date, data.event_type, data.repeat_month, data.repeat_day, now, now).run();
   return getCountdown(db, result.meta.last_row_id);
 }
 

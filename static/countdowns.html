@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="description" content="Puck Office 倒数日。" />
+  <meta name="theme-color" content="#f4f0e8" />
+  <title>Puck Office · 倒数日</title>
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+  <link rel="stylesheet" href="/style.css" />
+</head>
+<body data-page="countdowns">
+  <a class="skip-link" href="#content">跳到内容</a>
+  <header class="topbar">
+    <div class="topbar-inner">
+      <a class="brand" href="/">Puck Office</a>
+      <nav class="main-nav" aria-label="主导航">
+        <a href="/">待办</a>
+        <a class="active" href="/countdowns.html" aria-current="page">倒数日</a>
+        <a href="/notes.html">笔记</a>
+      </nav>
+      <button id="logoutButton" class="logout-btn" type="button">退出</button>
+    </div>
+  </header>
+
+  <main id="content" class="shell">
+    <section class="page-head">
+      <div>
+        <p class="eyebrow">Countdown</p>
+        <h1>倒数日</h1>
+      </div>
+    </section>
+
+    <section class="panel composer">
+      <div class="panel-head compact-head">
+        <h2>新增事件</h2>
+      </div>
+      <form id="countdownForm" class="form-grid countdown-form">
+        <label class="field title-field">
+          <span>事件</span>
+          <input id="countdownTitleInput" type="text" maxlength="120" placeholder="旅行出发" required />
+        </label>
+        <label class="field countdown-date-field">
+          <span>日期</span>
+          <input id="countdownDateInput" type="date" required />
+        </label>
+        <button class="primary-btn" type="submit">添加</button>
+      </form>
+    </section>
+
+    <section class="panel list-panel countdown-panel">
+      <div class="panel-head">
+        <div>
+          <h2>全部事件</h2>
+          <p id="countdownsMeta">Loading...</p>
+        </div>
+      </div>
+      <div id="countdownsList" class="countdown-grid"></div>
+    </section>
+  </main>
+
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+  <script type="module" src="/app.js"></script>
+</body>
+</html>

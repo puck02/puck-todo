@@ -22,6 +22,7 @@ DEFAULT_DB_PATH = ROOT / "todos.db"
 PRIORITY_WEIGHT = {"urgent": 4, "high": 3, "medium": 2, "low": 1}
 VALID_PRIORITIES = set(PRIORITY_WEIGHT)
 VALID_STATUS = {"pending", "completed"}
+DATE_FORMAT = "%Y-%m-%d"
 SESSION_COOKIE = "puck_session"
 SESSION_TTL_SECONDS = 60 * 60 * 24 * 30
 LOGIN_ASSET_PATHS = {"/login", "/login.html"}
@@ -42,6 +43,10 @@ def month_range(month: str) -> tuple[str, str]:
     start = datetime.strptime(month, "%Y-%m")
     end = start.replace(year=start.year + 1, month=1) if start.month == 12 else start.replace(month=start.month + 1)
     return start.isoformat(), end.isoformat()
+
+
+def parse_date(value: str) -> str:
+    return datetime.strptime(value, DATE_FORMAT).strftime(DATE_FORMAT)
 
 
 def normalize(row: sqlite3.Row) -> dict[str, Any]:
@@ -185,6 +190,16 @@ class TodoStore:
             columns = {row[1] for row in conn.execute("PRAGMA table_info(todos)").fetchall()}
             if "note" not in columns:
                 conn.execute("ALTER TABLE todos ADD COLUMN note TEXT NOT NULL DEFAULT ''")
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS countdowns (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    title TEXT NOT NULL,
+                    target_date TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                )
+            """)
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_countdowns_target_date ON countdowns(target_date)")
             conn.commit()
 
     def create_todo(self, title: str, priority: str, due_at: str, note: str = "") -> dict[str, Any]:
@@ -338,6 +353,38 @@ class TodoStore:
             conn.commit()
         return {"generated_at": now.isoformat(), "window_minutes": window_minutes, "items": items}
 
+    def create_countdown(self, title: str, target_date: str) -> dict[str, Any]:
+        title = (title or "").strip()
+        if not title:
+            raise ValueError("事件名称不能为空")
+        target_date = parse_date(str(target_date or ""))
+        now = now_local().isoformat()
+        with self.connect() as conn:
+            cur = conn.execute(
+                "INSERT INTO countdowns (title, target_date, created_at, updated_at) VALUES (?, ?, ?, ?)",
+                (title, target_date, now, now),
+            )
+            conn.commit()
+            return self.get_countdown(cur.lastrowid)
+
+    def get_countdown(self, countdown_id: int) -> dict[str, Any]:
+        with self.connect() as conn:
+            row = conn.execute("SELECT * FROM countdowns WHERE id=?", (countdown_id,)).fetchone()
+        if row is None:
+            raise KeyError("倒数日不存在")
+        return dict(row)
+
+    def list_countdowns(self) -> dict[str, Any]:
+        with self.connect() as conn:
+            rows = conn.execute("SELECT * FROM countdowns ORDER BY target_date ASC, created_at ASC").fetchall()
+        return {"countdowns": [dict(row) for row in rows]}
+
+    def delete_countdown(self, countdown_id: int) -> dict[str, bool]:
+        with self.connect() as conn:
+            cur = conn.execute("DELETE FROM countdowns WHERE id=?", (countdown_id,))
+            conn.commit()
+        return {"ok": cur.rowcount > 0}
+
 
 def make_handler(db_path: str):
     store = TodoStore(db_path)
@@ -418,6 +465,8 @@ def make_handler(db_path: str):
                 if parsed.path == "/api/todos":
                     month = qs.get("month", [datetime.now().strftime("%Y-%m")])[0]
                     return self.send_json(store.list_month(month))
+                if parsed.path == "/api/countdowns":
+                    return self.send_json(store.list_countdowns())
                 if parsed.path == "/api/reminders/daily":
                     now = parse_dt(qs["now"][0]) if "now" in qs else None
                     return self.send_json(store.daily_reminders(now))
@@ -439,6 +488,9 @@ def make_handler(db_path: str):
                 if path == "/api/todos":
                     p = self.read_json()
                     return self.send_json(store.create_todo(p.get("title", ""), p.get("priority", "medium"), p.get("due_at", ""), p.get("note", "")))
+                if path == "/api/countdowns":
+                    p = self.read_json()
+                    return self.send_json(store.create_countdown(p.get("title", ""), p.get("target_date", "")), 201)
                 if path.startswith("/api/todos/") and path.endswith("/complete"):
                     return self.send_json(store.complete_todo(int(path.split("/")[3])))
                 if path.startswith("/api/todos/") and path.endswith("/uncomplete"):
@@ -467,6 +519,8 @@ def make_handler(db_path: str):
             try:
                 if not self.require_user():
                     return
+                if path.startswith("/api/countdowns/"):
+                    return self.send_json(store.delete_countdown(int(path.split("/")[3])))
                 if path.startswith("/api/todos/"):
                     return self.send_json(store.delete_todo(int(path.split("/")[3])))
                 return self.send_error_json("Not found", 404)

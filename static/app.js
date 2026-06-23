@@ -45,6 +45,33 @@ function formatDue(iso) {
   return `${m}/${day} ${h}:${min}`;
 }
 
+function formatDateText(dateString) {
+  const [year, month, day] = String(dateString || '').split('-');
+  return year && month && day ? `${year}/${month}/${day}` : '';
+}
+
+function localDateFromString(dateString) {
+  const [year, month, day] = String(dateString || '').split('-').map(Number);
+  return new Date(year, month - 1, day);
+}
+
+function todayLocalDate() {
+  const now = new Date();
+  return new Date(now.getFullYear(), now.getMonth(), now.getDate());
+}
+
+function todayDateString() {
+  const d = todayLocalDate();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
+function countdownStatus(item) {
+  const diff = Math.round((localDateFromString(item.target_date) - todayLocalDate()) / 86400000);
+  if (diff > 0) return { label: `还有 ${diff} 天`, caption: '还有', value: String(diff), suffix: '天', kind: 'future' };
+  if (diff < 0) return { label: `已过去 ${Math.abs(diff)} 天`, caption: '已过去', value: String(Math.abs(diff)), suffix: '天', kind: 'past' };
+  return { label: '今天', caption: '', value: '今天', suffix: '', kind: 'today' };
+}
+
 function renderTodoNote(note) {
   if (!note) return null;
   const noteEl = document.createElement('div');
@@ -415,6 +442,195 @@ function initTodosPage() {
   loadTodos().catch(err => toast(err.message));
 }
 
+function initCountdownsPage() {
+  const state = { countdowns: [], busy: false, nextTempId: 1 };
+  const COUNTDOWN_TRANSITION_MS = 220;
+  const countdownForm = $('countdownForm');
+  const titleInput = $('countdownTitleInput');
+  const dateInput = $('countdownDateInput');
+  const countdownsMeta = $('countdownsMeta');
+  const countdownsList = $('countdownsList');
+
+  function wait(ms) {
+    return new Promise(resolve => setTimeout(resolve, ms));
+  }
+
+  function syncCountdownBusyControls() {
+    document.body.classList.toggle('countdown-locked', state.busy);
+    document.body.setAttribute('aria-busy', String(state.busy));
+    for (const el of document.querySelectorAll('body[data-page="countdowns"] button, body[data-page="countdowns"] input')) {
+      el.disabled = state.busy;
+    }
+  }
+
+  function setCountdownOperationBusy(busy) {
+    state.busy = busy;
+    syncCountdownBusyControls();
+  }
+
+  function sortCountdowns(items) {
+    return items.sort((a, b) =>
+      String(a.target_date || '').localeCompare(String(b.target_date || '')) ||
+      String(a.created_at || '').localeCompare(String(b.created_at || ''))
+    );
+  }
+
+  function addOptimisticCountdown(payload) {
+    const now = new Date().toISOString().slice(0, 19);
+    const item = {
+      id: `temp-${Date.now()}-${state.nextTempId++}`,
+      title: payload.title.trim(),
+      target_date: payload.target_date,
+      created_at: now,
+      updated_at: now,
+      __entering: true,
+      __optimistic: true
+    };
+    state.countdowns = sortCountdowns([...state.countdowns, item]);
+    renderCountdowns();
+    return item;
+  }
+
+  function replaceOptimisticCountdown(tempId, countdown) {
+    state.countdowns = sortCountdowns(state.countdowns.map((item) => String(item.id) === String(tempId) ? countdown : item));
+    renderCountdowns();
+  }
+
+  function removeCountdownFromState(countdownId) {
+    state.countdowns = state.countdowns.filter((item) => String(item.id) !== String(countdownId));
+  }
+
+  async function removeCountdownWithTransition(countdownId) {
+    const card = document.querySelector(`[data-countdown-id="${String(countdownId)}"]`);
+    if (card) {
+      card.classList.add('leaving');
+      await wait(COUNTDOWN_TRANSITION_MS);
+    }
+    removeCountdownFromState(countdownId);
+    renderCountdowns();
+  }
+
+  function renderCountdowns() {
+    countdownsMeta.textContent = `${state.countdowns.length} 件`;
+    countdownsList.innerHTML = '';
+    if (!state.countdowns.length) {
+      const empty = document.createElement('div');
+      empty.className = 'empty';
+      empty.textContent = '暂无倒数日。';
+      countdownsList.appendChild(empty);
+      syncCountdownBusyControls();
+      return;
+    }
+
+    for (const item of state.countdowns) {
+      const status = countdownStatus(item);
+      const card = document.createElement('article');
+      card.className = [
+        'countdown-card',
+        status.kind,
+        item.__entering ? 'entering' : '',
+        item.__optimistic ? 'pending-sync' : ''
+      ].filter(Boolean).join(' ');
+      card.dataset.countdownId = String(item.id);
+
+      const main = document.createElement('div');
+      main.className = 'countdown-main';
+      const title = document.createElement('h3');
+      title.textContent = item.title;
+      const date = document.createElement('p');
+      date.className = 'countdown-date';
+      date.textContent = formatDateText(item.target_date);
+      main.append(title, date);
+
+      const statusBlock = document.createElement('div');
+      statusBlock.className = 'countdown-status';
+      statusBlock.setAttribute('aria-label', status.label);
+      if (status.caption) {
+        const caption = document.createElement('p');
+        caption.className = 'countdown-label';
+        caption.textContent = status.caption;
+        statusBlock.appendChild(caption);
+      }
+      const value = document.createElement('p');
+      value.className = 'countdown-value';
+      value.textContent = status.value;
+      const label = document.createElement('p');
+      label.className = 'countdown-label';
+      label.textContent = status.suffix || status.label;
+      statusBlock.append(value, label);
+
+      const actions = document.createElement('div');
+      actions.className = 'actions';
+      const del = document.createElement('button');
+      del.className = 'icon-btn danger';
+      del.type = 'button';
+      del.textContent = '删除';
+      del.title = '删除倒数日';
+      del.setAttribute('aria-label', `删除倒数日：${item.title}`);
+      del.addEventListener('click', async () => {
+        if (state.busy || item.__optimistic) return;
+        if (!confirm(`删除「${item.title}」？`)) return;
+        const previous = [...state.countdowns];
+        setCountdownOperationBusy(true);
+        try {
+          await removeCountdownWithTransition(item.id);
+          await request(`/api/countdowns/${item.id}`, { method: 'DELETE' });
+          toast('已删除');
+        } catch (err) {
+          state.countdowns = previous;
+          renderCountdowns();
+          toast(err.message);
+        } finally {
+          setCountdownOperationBusy(false);
+        }
+      });
+      actions.append(del);
+
+      card.append(main, statusBlock, actions);
+      countdownsList.appendChild(card);
+      if (item.__entering) {
+        requestAnimationFrame(() => card.classList.remove('entering'));
+        item.__entering = false;
+      }
+    }
+    syncCountdownBusyControls();
+  }
+
+  async function loadCountdowns() {
+    const data = await request('/api/countdowns');
+    state.countdowns = data.countdowns || [];
+    renderCountdowns();
+  }
+
+  countdownForm.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    if (state.busy) return;
+    const payload = {
+      title: titleInput.value,
+      target_date: dateInput.value
+    };
+    const previous = [...state.countdowns];
+    setCountdownOperationBusy(true);
+    const optimistic = addOptimisticCountdown(payload);
+    titleInput.value = '';
+    try {
+      const created = await request('/api/countdowns', { method: 'POST', body: JSON.stringify(payload) });
+      replaceOptimisticCountdown(optimistic.id, created);
+      toast('已添加');
+    } catch (err) {
+      state.countdowns = previous;
+      titleInput.value = payload.title;
+      renderCountdowns();
+      toast(err.message);
+    } finally {
+      setCountdownOperationBusy(false);
+    }
+  });
+
+  dateInput.value = todayDateString();
+  loadCountdowns().catch(err => toast(err.message));
+}
+
 function initNotesPage() {
   const state = { notes: [], path: [], parentId: null, contextItem: null };
   const folderView = $('folderView');
@@ -624,6 +840,10 @@ if (page === 'login') initLoginPage();
 if (page === 'todos') {
   initLogoutButton();
   initTodosPage();
+}
+if (page === 'countdowns') {
+  initLogoutButton();
+  initCountdownsPage();
 }
 if (page === 'notes') {
   initLogoutButton();

@@ -3,10 +3,11 @@ import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 
 test('Cloudflare deployment files are wired for Workers, D1, assets, and GitHub Actions', async () => {
-  const [wrangler, workflow, migration, ciPrepare] = await Promise.all([
+  const [wrangler, workflow, migration, countdownMigration, ciPrepare] = await Promise.all([
     readFile(new URL('../wrangler.jsonc', import.meta.url), 'utf8'),
     readFile(new URL('../.github/workflows/deploy.yml', import.meta.url), 'utf8'),
     readFile(new URL('../migrations/0001_init.sql', import.meta.url), 'utf8'),
+    readFile(new URL('../migrations/0003_countdowns.sql', import.meta.url), 'utf8'),
     readFile(new URL('../scripts/prepare-ci-wrangler-config.mjs', import.meta.url), 'utf8')
   ]);
 
@@ -42,5 +43,7 @@ test('Cloudflare deployment files are wired for Workers, D1, assets, and GitHub 
   assert.match(workflow, /wranglerVersion:\s*"4"/);
   assert.match(workflow, /cloudflare\/wrangler-action@v3/);
   assert.match(migration, /CREATE TABLE IF NOT EXISTS notes/);
+  assert.match(countdownMigration, /CREATE TABLE IF NOT EXISTS countdowns/);
+  assert.match(countdownMigration, /idx_countdowns_target_date/);
   assert.match(ciPrepare, /delete config\.routes/);
 });

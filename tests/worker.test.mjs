@@ -13,8 +13,10 @@ class FakeD1 {
   constructor() {
     this.nextTodoId = 1;
     this.nextNoteId = 1;
+    this.nextCountdownId = 1;
     this.todos = [];
     this.notes = [];
+    this.countdowns = [];
   }
 
   prepare(sql) {
@@ -72,6 +74,14 @@ class FakeStatement {
           .sort((a, b) => sortNotes(a, b, sql))
       };
     }
+    if (sql.startsWith('SELECT * FROM countdowns ORDER BY')) {
+      return {
+        results: [...this.db.countdowns].sort((a, b) =>
+          String(a.target_date).localeCompare(String(b.target_date)) ||
+          String(a.created_at).localeCompare(String(b.created_at))
+        )
+      };
+    }
     throw new Error(`Unexpected all SQL: ${sql}`);
   }
 
@@ -82,6 +92,9 @@ class FakeStatement {
     }
     if (sql.startsWith('SELECT * FROM notes WHERE id=')) {
       return this.db.notes.find((note) => note.id === this.params[0]) || null;
+    }
+    if (sql.startsWith('SELECT * FROM countdowns WHERE id=')) {
+      return this.db.countdowns.find((item) => item.id === this.params[0]) || null;
     }
     throw new Error(`Unexpected first SQL: ${sql}`);
   }
@@ -113,6 +126,12 @@ class FakeStatement {
       this.db.notes.push({ id, title, body, type, parent_id, created_at: now, updated_at: now });
       return { meta: { last_row_id: id, changes: 1 } };
     }
+    if (sql.startsWith('INSERT INTO countdowns')) {
+      const [title, target_date, now] = this.params;
+      const id = this.db.nextCountdownId++;
+      this.db.countdowns.push({ id, title, target_date, created_at: now, updated_at: now });
+      return { meta: { last_row_id: id, changes: 1 } };
+    }
     if (sql.startsWith('DELETE FROM notes WHERE id IN')) {
       const [id] = this.params;
       const ids = new Set([id]);
@@ -135,6 +154,12 @@ class FakeStatement {
       const before = this.db.notes.length;
       this.db.notes = this.db.notes.filter((note) => note.id !== id);
       return { meta: { changes: before - this.db.notes.length } };
+    }
+    if (sql.startsWith('DELETE FROM countdowns WHERE id=')) {
+      const [id] = this.params;
+      const before = this.db.countdowns.length;
+      this.db.countdowns = this.db.countdowns.filter((item) => item.id !== id);
+      return { meta: { changes: before - this.db.countdowns.length } };
     }
     if (sql.startsWith("UPDATE todos SET status='completed'")) {
       const [now, , id] = this.params;
@@ -288,6 +313,41 @@ test('Worker notes API creates notes and lists newest first', async () => {
   const listed = await authenticatedRequest(db, '/api/notes');
   assert.equal(listed.body.notes.length, 1);
   assert.equal(listed.body.notes[0].title, '灵感');
+});
+
+test('Worker countdown API creates lists validates and deletes events', async () => {
+  const db = new FakeD1();
+
+  const denied = await request(db, '/api/countdowns');
+  assert.equal(denied.res.status, 401);
+
+  const empty = await authenticatedRequest(db, '/api/countdowns');
+  assert.equal(empty.res.status, 200);
+  assert.deepEqual(empty.body.countdowns, []);
+
+  const invalid = await authenticatedRequest(db, '/api/countdowns', {
+    method: 'POST',
+    body: JSON.stringify({ title: '旅行', target_date: '2026-02-31' })
+  });
+  assert.equal(invalid.res.status, 400);
+
+  const created = await authenticatedRequest(db, '/api/countdowns', {
+    method: 'POST',
+    body: JSON.stringify({ title: '旅行', target_date: '2026-07-01' })
+  });
+  assert.equal(created.res.status, 201);
+  assert.equal(created.body.title, '旅行');
+  assert.equal(created.body.target_date, '2026-07-01');
+
+  const listed = await authenticatedRequest(db, '/api/countdowns');
+  assert.deepEqual(listed.body.countdowns.map((item) => item.title), ['旅行']);
+
+  const deleted = await authenticatedRequest(db, `/api/countdowns/${created.body.id}`, { method: 'DELETE' });
+  assert.equal(deleted.res.status, 200);
+  assert.equal(deleted.body.ok, true);
+
+  const afterDelete = await authenticatedRequest(db, '/api/countdowns');
+  assert.deepEqual(afterDelete.body.countdowns, []);
 });
 
 test('Worker notes API supports nested folders and files', async () => {

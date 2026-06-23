@@ -157,6 +157,13 @@ function normalizeNote(row) {
   };
 }
 
+function normalizeCountdown(row) {
+  return {
+    ...row,
+    target_date: String(row.target_date || '').slice(0, 10)
+  };
+}
+
 function monthRange(month) {
   if (!/^\d{4}-\d{2}$/.test(month)) throw new HttpError('月份格式必须是 YYYY-MM');
   const [year, monthIndex] = month.split('-').map(Number);
@@ -222,6 +229,23 @@ function validateNotePayload(payload, partial = false) {
   }
   if (updates.type === 'folder') updates.body = '';
   return updates;
+}
+
+function isValidDateString(value) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+  const [year, month, day] = value.split('-').map(Number);
+  const date = new Date(Date.UTC(year, month - 1, day));
+  return date.getUTCFullYear() === year &&
+    date.getUTCMonth() === month - 1 &&
+    date.getUTCDate() === day;
+}
+
+function validateCountdownPayload(payload) {
+  const title = String(payload.title || '').trim();
+  const target_date = String(payload.target_date || '').trim();
+  if (!title) throw new HttpError('事件名称不能为空');
+  if (!isValidDateString(target_date)) throw new HttpError('日期格式必须是 YYYY-MM-DD');
+  return { title, target_date };
 }
 
 async function getTodo(db, id) {
@@ -351,6 +375,29 @@ async function deleteNote(db, id) {
   return { ok: result.meta.changes > 0 };
 }
 
+async function getCountdown(db, id) {
+  const row = await db.prepare('SELECT * FROM countdowns WHERE id=?').bind(id).first();
+  if (!row) throw new HttpError('倒数日不存在', 404);
+  return normalizeCountdown(row);
+}
+
+async function listCountdowns(db) {
+  const { results = [] } = await db.prepare('SELECT * FROM countdowns ORDER BY target_date ASC, created_at ASC').all();
+  return { countdowns: results.map(normalizeCountdown) };
+}
+
+async function createCountdown(db, payload) {
+  const data = validateCountdownPayload(payload);
+  const now = nowIso();
+  const result = await db.prepare('INSERT INTO countdowns (title, target_date, created_at, updated_at) VALUES (?, ?, ?, ?)').bind(data.title, data.target_date, now, now).run();
+  return getCountdown(db, result.meta.last_row_id);
+}
+
+async function deleteCountdown(db, id) {
+  const result = await db.prepare('DELETE FROM countdowns WHERE id=?').bind(id).run();
+  return { ok: result.meta.changes > 0 };
+}
+
 async function handleAuthApi(request, env, url) {
   const path = url.pathname;
   const method = request.method;
@@ -423,6 +470,15 @@ async function handleApi(request, env) {
     }
   }
 
+  if (parts[1] === 'countdowns') {
+    if (method === 'GET' && parts.length === 2) return json(await listCountdowns(env.DB));
+    if (method === 'POST' && parts.length === 2) return json(await createCountdown(env.DB, await readJson(request)), 201);
+    if (parts.length === 3) {
+      const id = toId(parts[2]);
+      if (method === 'DELETE') return json(await deleteCountdown(env.DB, id));
+    }
+  }
+
   throw new HttpError('Not found', 404);
 }
 
@@ -460,11 +516,14 @@ export default {
 };
 
 export {
+  createCountdown,
   createNote,
   createTodo,
+  listCountdowns,
   listNotes,
   listTodos,
   monthRange,
+  validateCountdownPayload,
   validateNotePayload,
   validateTodoPayload
 };

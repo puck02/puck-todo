@@ -85,6 +85,39 @@ test('office UI includes login page and logout controls', async () => {
   assert.match(style, /\.logout-btn/);
 });
 
+test('office UI includes a countdown page', async () => {
+  const [homeHtml, notesHtml, countdownHtml, app, style] = await Promise.all([
+    readFile(new URL('../static/index.html', import.meta.url), 'utf8'),
+    readFile(new URL('../static/notes.html', import.meta.url), 'utf8'),
+    readFile(new URL('../static/countdowns.html', import.meta.url), 'utf8'),
+    readFile(new URL('../static/app.js', import.meta.url), 'utf8'),
+    readFile(new URL('../static/style.css', import.meta.url), 'utf8')
+  ]);
+
+  for (const html of [homeHtml, notesHtml, countdownHtml]) {
+    assert.match(html, /href="\/countdowns\.html"/);
+    assert.match(html, />倒数日</);
+  }
+  assert.match(countdownHtml, /data-page="countdowns"/);
+  assert.match(countdownHtml, /aria-current="page">倒数日</);
+  assert.match(countdownHtml, /id="logoutButton"/);
+  assert.match(countdownHtml, /id="countdownForm"/);
+  assert.match(countdownHtml, /id="countdownTitleInput"/);
+  assert.match(countdownHtml, /id="countdownDateInput"/);
+  assert.match(countdownHtml, /id="countdownsMeta"/);
+  assert.match(countdownHtml, /id="countdownsList"/);
+  assert.match(countdownHtml, /type="module"/);
+
+  assert.match(app, /initCountdownsPage/);
+  assert.match(app, /\/api\/countdowns/);
+  assert.match(app, /还有/);
+  assert.match(app, /已过去/);
+  assert.match(app, /今天/);
+  assert.match(style, /\.countdown-grid/);
+  assert.match(style, /\.countdown-card/);
+  assert.match(style, /\.countdown-value/);
+});
+
 test('todo add and delete interactions use transitions with operation lockout', async () => {
   const [app, style] = await Promise.all([
     readFile(new URL('../static/app.js', import.meta.url), 'utf8'),

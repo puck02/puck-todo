@@ -76,6 +76,23 @@ class TodoCoreTests(unittest.TestCase):
         second = self.store.due_soon_reminders(now + timedelta(minutes=1), 30)
         self.assertEqual(second["items"], [])
 
+    def test_countdown_events_can_be_created_listed_and_deleted(self):
+        with self.assertRaises(ValueError):
+            self.store.create_countdown("", "2026-07-01")
+        with self.assertRaises(ValueError):
+            self.store.create_countdown("无效日期", "2026-02-31")
+
+        later = self.store.create_countdown("旅行", "2026-07-01")
+        earlier = self.store.create_countdown("生日", "2026-06-01")
+
+        listed = self.store.list_countdowns()
+        self.assertEqual([item["title"] for item in listed["countdowns"]], ["生日", "旅行"])
+
+        deleted = self.store.delete_countdown(later["id"])
+        self.assertEqual(deleted, {"ok": True})
+        after_delete = self.store.list_countdowns()
+        self.assertEqual([item["id"] for item in after_delete["countdowns"]], [earlier["id"]])
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -8,6 +8,7 @@ const SESSION_TTL_SECONDS = 60 * 60 * 24 * 30;
 const LOGIN_ASSET_PATHS = new Set(['/login', '/login.html']);
 const PUBLIC_ASSET_PATHS = new Set(['/style.css', '/app.js', '/markdown.js', '/favicon.svg']);
 const encoder = new TextEncoder();
+const hmacKeyCache = new Map();
 
 class HttpError extends Error {
   constructor(message, status = 400) {
@@ -77,7 +78,11 @@ function requireAuthConfig(env) {
 }
 
 async function hmacKey(secret) {
-  return crypto.subtle.importKey('raw', encoder.encode(secret), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign', 'verify']);
+  const cached = hmacKeyCache.get(secret);
+  if (cached) return cached;
+  const key = crypto.subtle.importKey('raw', encoder.encode(secret), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign', 'verify']);
+  hmacKeyCache.set(secret, key);
+  return key;
 }
 
 async function signSessionPayload(payload, secret) {
@@ -295,17 +300,22 @@ async function getTodo(db, id) {
 
 async function listTodos(db, month) {
   const [start, end] = monthRange(month);
-  const { results = [] } = await db.prepare(`
-    SELECT * FROM todos WHERE due_at >= ? AND due_at < ?
+  const [{ results: pendingRows = [] }, { results: completedRows = [] }] = await Promise.all([
+    db.prepare(`
+    SELECT * FROM todos WHERE status='pending' AND due_at >= ? AND due_at < ?
     ORDER BY CASE priority WHEN 'urgent' THEN 4 WHEN 'high' THEN 3 WHEN 'medium' THEN 2 ELSE 1 END DESC,
              due_at ASC, created_at ASC
-  `).bind(start, end).all();
-  const items = results.map(normalizeTodo);
-  const pending = items.filter((item) => item.status === 'pending');
-  const completed = items
-    .filter((item) => item.status === 'completed')
-    .sort((a, b) => String(b.completed_at || '').localeCompare(String(a.completed_at || '')));
-  return { month, pending, completed };
+  `).bind(start, end).all(),
+    db.prepare(`
+    SELECT * FROM todos WHERE status='completed' AND due_at >= ? AND due_at < ?
+    ORDER BY completed_at DESC, due_at ASC, created_at ASC
+  `).bind(start, end).all()
+  ]);
+  return {
+    month,
+    pending: pendingRows.map(normalizeTodo),
+    completed: completedRows.map(normalizeTodo)
+  };
 }
 
 async function createTodo(db, payload) {

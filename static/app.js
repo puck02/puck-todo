@@ -152,11 +152,31 @@ function countdownStatus(item) {
   return onceCountdownStatus(item);
 }
 
+const MARKDOWN_CACHE_LIMIT = 120;
+const todoMarkdownCache = new Map();
+
+function renderMarkdownCached(markdown = '') {
+  const key = String(markdown || '');
+  if (!key) return '';
+  if (todoMarkdownCache.has(key)) {
+    const cached = todoMarkdownCache.get(key);
+    todoMarkdownCache.delete(key);
+    todoMarkdownCache.set(key, cached);
+    return cached;
+  }
+  const html = renderMarkdown(key);
+  todoMarkdownCache.set(key, html);
+  if (todoMarkdownCache.size > MARKDOWN_CACHE_LIMIT) {
+    todoMarkdownCache.delete(todoMarkdownCache.keys().next().value);
+  }
+  return html;
+}
+
 function renderTodoNote(note) {
   if (!note) return null;
   const noteEl = document.createElement('div');
   noteEl.className = 'todo-note markdown-preview compact-markdown';
-  noteEl.innerHTML = renderMarkdown(note);
+  noteEl.innerHTML = renderMarkdownCached(note);
   return noteEl;
 }
 
@@ -213,7 +233,7 @@ function initLoginPage() {
 }
 
 function initTodosPage() {
-  const state = { month: '', data: { pending: [], completed: [] }, busy: false, nextTempId: 1 };
+  const state = { month: '', data: { pending: [], completed: [] }, busy: false, nextTempId: 1, loadSeq: 0 };
   const TODO_TRANSITION_MS = 220;
   const monthPicker = $('monthPicker');
   const pendingList = $('pendingList');
@@ -262,6 +282,10 @@ function initTodosPage() {
     syncTodoBusyControls();
   }
 
+  function invalidateTodoLoads() {
+    state.loadSeq += 1;
+  }
+
   function sortPending(items) {
     const weights = { urgent: 4, high: 3, medium: 2, low: 1 };
     return items.sort((a, b) =>
@@ -290,6 +314,24 @@ function initTodosPage() {
     const keep = (todo) => String(todo.id) !== String(todoId);
     state.data.pending = state.data.pending.filter(keep);
     state.data.completed = state.data.completed.filter(keep);
+  }
+
+  function findTodoById(todoId) {
+    return [...state.data.pending, ...state.data.completed].find((todo) => String(todo.id) === String(todoId));
+  }
+
+  function replaceTodoInState(todo) {
+    removeTodoFromState(todo.id);
+    if (todo.due_at?.slice(0, 7) !== state.month) return;
+    if (todo.status === 'completed') {
+      state.data.completed = [todo, ...state.data.completed].sort((a, b) =>
+        String(b.completed_at || '').localeCompare(String(a.completed_at || '')) ||
+        String(a.due_at || '').localeCompare(String(b.due_at || '')) ||
+        String(a.created_at || '').localeCompare(String(b.created_at || ''))
+      );
+    } else {
+      state.data.pending = sortPending([...state.data.pending, todo]);
+    }
   }
 
   function addOptimisticTodo(payload) {
@@ -322,7 +364,8 @@ function initTodosPage() {
   }
 
   function replaceOptimisticTodo(tempId, todo) {
-    state.data.pending = sortPending(state.data.pending.map((item) => String(item.id) === String(tempId) ? todo : item));
+    removeTodoFromState(tempId);
+    replaceTodoInState(todo);
     renderTodos();
   }
 
@@ -341,15 +384,15 @@ function initTodosPage() {
   }
 
   function renderList(container, items, completed = false) {
-    container.innerHTML = '';
     if (!items.length) {
       const empty = document.createElement('div');
       empty.className = 'empty';
       empty.textContent = completed ? '暂无已完成。' : '暂无待办。';
-      container.appendChild(empty);
+      container.replaceChildren(empty);
       return;
     }
 
+    const fragment = document.createDocumentFragment();
     for (const item of items) {
       const card = document.createElement('article');
       card.className = [
@@ -364,17 +407,8 @@ function initTodosPage() {
       check.className = `check ${completed ? 'done' : ''}`;
       check.type = 'button';
       check.title = completed ? '取消完成' : '标记完成';
+      check.dataset.todoAction = 'toggle';
       check.setAttribute('aria-label', completed ? `取消完成：${item.title}` : `标记完成：${item.title}`);
-      check.addEventListener('click', async () => {
-        if (state.busy || item.__optimistic) return;
-        try {
-          await request(`/api/todos/${item.id}/${completed ? 'uncomplete' : 'complete'}`, { method: 'POST' });
-          toast(completed ? '已恢复' : '已完成');
-          await loadTodos();
-        } catch (err) {
-          toast(err.message);
-        }
-      });
 
       const body = document.createElement('div');
       const title = document.createElement('p');
@@ -396,49 +430,93 @@ function initTodosPage() {
       edit.type = 'button';
       edit.textContent = '编辑';
       edit.title = '编辑待办';
+      edit.dataset.todoAction = 'edit';
       edit.setAttribute('aria-label', `编辑待办：${item.title}`);
-      edit.addEventListener('click', () => {
-        if (state.busy || item.__optimistic) return;
-        openEditModal(item);
-      });
 
       const del = document.createElement('button');
       del.className = 'icon-btn danger';
       del.type = 'button';
       del.textContent = '删除';
       del.title = '删除待办';
+      del.dataset.todoAction = 'delete';
       del.setAttribute('aria-label', `删除待办：${item.title}`);
-      del.addEventListener('click', async () => {
-        if (state.busy || item.__optimistic) return;
-        if (!confirm(`删除「${item.title}」？`)) return;
-        const previousData = cloneTodoData();
-        setTodoOperationBusy(true);
-        try {
-          await removeTodoWithTransition(item.id);
-          await request(`/api/todos/${item.id}`, { method: 'DELETE' });
-          toast('已删除');
-        } catch (err) {
-          state.data = previousData;
-          renderTodos();
-          toast(err.message);
-        } finally {
-          setTodoOperationBusy(false);
-        }
-      });
       actions.append(edit, del);
 
       card.append(check, body, actions);
-      container.appendChild(card);
+      fragment.appendChild(card);
       if (item.__entering) {
         requestAnimationFrame(() => card.classList.remove('entering'));
         item.__entering = false;
       }
     }
+    container.replaceChildren(fragment);
+  }
+
+  async function toggleTodo(item) {
+    if (state.busy || item.__optimistic) return;
+    invalidateTodoLoads();
+    const previousData = cloneTodoData();
+    const completed = item.status === 'completed';
+    const now = new Date().toISOString().slice(0, 19);
+    const moved = {
+      ...item,
+      status: completed ? 'pending' : 'completed',
+      completed_at: completed ? null : now,
+      updated_at: now,
+      __entering: true
+    };
+    replaceTodoInState(moved);
+    renderTodos();
+    try {
+      const saved = await request(`/api/todos/${item.id}/${completed ? 'uncomplete' : 'complete'}`, { method: 'POST' });
+      replaceTodoInState(saved);
+      renderTodos();
+      toast(completed ? '已恢复' : '已完成');
+    } catch (err) {
+      state.data = previousData;
+      renderTodos();
+      toast(err.message);
+    }
+  }
+
+  async function deleteTodo(item) {
+    if (state.busy || item.__optimistic) return;
+    if (!confirm(`删除「${item.title}」？`)) return;
+    invalidateTodoLoads();
+    const previousData = cloneTodoData();
+    setTodoOperationBusy(true);
+    try {
+      await removeTodoWithTransition(item.id);
+      await request(`/api/todos/${item.id}`, { method: 'DELETE' });
+      toast('已删除');
+    } catch (err) {
+      state.data = previousData;
+      renderTodos();
+      toast(err.message);
+    } finally {
+      setTodoOperationBusy(false);
+    }
+  }
+
+  function handleTodoListClick(event) {
+    const button = event.target.closest('button[data-todo-action]');
+    if (!button || !event.currentTarget.contains(button)) return;
+    const card = button.closest('[data-todo-id]');
+    const item = card ? findTodoById(card.dataset.todoId) : null;
+    if (!item) return;
+    const action = button.dataset.todoAction;
+    if (action === 'toggle') toggleTodo(item);
+    if (action === 'edit' && !state.busy && !item.__optimistic) openEditModal(item);
+    if (action === 'delete') deleteTodo(item);
   }
 
   async function loadTodos() {
-    state.month = monthPicker.value || currentMonth();
-    state.data = await request(`/api/todos?month=${encodeURIComponent(state.month)}`);
+    const seq = ++state.loadSeq;
+    const month = monthPicker.value || currentMonth();
+    state.month = month;
+    const data = await request(`/api/todos?month=${encodeURIComponent(month)}`);
+    if (seq !== state.loadSeq) return;
+    state.data = data;
     renderTodos();
   }
 
@@ -467,6 +545,7 @@ function initTodosPage() {
     };
     const previousMonth = monthPicker.value;
     const previousData = cloneTodoData();
+    invalidateTodoLoads();
     setTodoOperationBusy(true);
     const optimisticTodo = addOptimisticTodo(payload);
     $('titleInput').value = '';
@@ -493,6 +572,8 @@ function initTodosPage() {
     if (state.busy) return;
     loadTodos().catch(err => toast(err.message));
   });
+  pendingList.addEventListener('click', handleTodoListClick);
+  completedList.addEventListener('click', handleTodoListClick);
   $('prevMonth').addEventListener('click', () => shiftMonth(-1));
   $('nextMonth').addEventListener('click', () => shiftMonth(1));
   closeEditModal.addEventListener('click', closeEditModalFn);
@@ -501,18 +582,38 @@ function initTodosPage() {
   editForm.addEventListener('submit', async (e) => {
     e.preventDefault();
     if (state.busy || !editState.currentId) return;
+    const todoId = editState.currentId;
+    const current = findTodoById(todoId);
+    if (!current) return;
     const payload = {
       title: editTitleInput.value,
       priority: editPriorityInput.value,
       due_at: editDueInput.value,
       note: editNoteInput.value
     };
+    const previousData = cloneTodoData();
+    invalidateTodoLoads();
+    const now = new Date().toISOString().slice(0, 19);
+    const optimistic = {
+      ...current,
+      ...payload,
+      title: payload.title.trim(),
+      note: payload.note.trim(),
+      updated_at: now,
+      __optimistic: true
+    };
+    replaceTodoInState(optimistic);
+    renderTodos();
+    closeEditModalFn();
     try {
-      await request(`/api/todos/${editState.currentId}`, { method: 'PATCH', body: JSON.stringify(payload) });
+      const saved = await request(`/api/todos/${todoId}`, { method: 'PATCH', body: JSON.stringify(payload) });
+      replaceTodoInState(saved);
+      renderTodos();
       toast('已保存');
-      closeEditModalFn();
-      await loadTodos();
     } catch (err) {
+      state.data = previousData;
+      renderTodos();
+      openEditModal({ ...current, ...payload });
       toast(err.message);
     }
   });
@@ -771,11 +872,20 @@ function initNotesPage() {
   const notePreview = $('notePreview');
   const saveNoteButton = $('saveNoteButton');
   const noteState = { currentId: null };
+  let previewFrame = 0;
 
   function updateNotePreview() {
-    const html = renderMarkdown(noteMarkdownInput.value);
+    const html = renderMarkdownCached(noteMarkdownInput.value);
     notePreview.classList.toggle('empty-preview', !html);
     notePreview.innerHTML = html || '开始输入后显示预览。';
+  }
+
+  function scheduleNotePreviewUpdate() {
+    if (previewFrame) return;
+    previewFrame = requestAnimationFrame(() => {
+      previewFrame = 0;
+      updateNotePreview();
+    });
   }
 
   function folderQuery() {
@@ -873,7 +983,7 @@ function initNotesPage() {
       if (note.type !== 'folder') {
         const iconPreview = document.createElement('span');
         iconPreview.className = 'file-icon-preview compact-markdown';
-        iconPreview.innerHTML = renderMarkdown(note.body || '');
+        iconPreview.innerHTML = renderMarkdownCached(note.body || '');
         fileIcon.append(iconPreview, fileLines);
       }
 
@@ -922,7 +1032,7 @@ function initNotesPage() {
     await loadNotes();
   }
 
-  noteMarkdownInput.addEventListener('input', updateNotePreview);
+  noteMarkdownInput.addEventListener('input', scheduleNotePreviewUpdate);
   noteForm.addEventListener('submit', async (e) => {
     e.preventDefault();
     const payload = {

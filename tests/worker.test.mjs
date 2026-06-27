@@ -17,9 +17,11 @@ class FakeD1 {
     this.todos = [];
     this.notes = [];
     this.countdowns = [];
+    this.sqlLog = [];
   }
 
   prepare(sql) {
+    this.sqlLog.push(sql.replace(/\s+/g, ' ').trim());
     return new FakeStatement(this, sql);
   }
 }
@@ -49,6 +51,28 @@ class FakeStatement {
 
   async all() {
     const sql = this.sql;
+    if (sql.startsWith("SELECT * FROM todos WHERE status='pending'")) {
+      const [start, end] = this.params;
+      const results = this.db.todos
+        .filter((todo) => todo.status === 'pending' && todo.due_at >= start && todo.due_at < end)
+        .sort((a, b) =>
+          priorityWeight(b.priority) - priorityWeight(a.priority) ||
+          a.due_at.localeCompare(b.due_at) ||
+          a.created_at.localeCompare(b.created_at)
+        );
+      return { results };
+    }
+    if (sql.startsWith("SELECT * FROM todos WHERE status='completed'")) {
+      const [start, end] = this.params;
+      const results = this.db.todos
+        .filter((todo) => todo.status === 'completed' && todo.due_at >= start && todo.due_at < end)
+        .sort((a, b) =>
+          String(b.completed_at || '').localeCompare(String(a.completed_at || '')) ||
+          a.due_at.localeCompare(b.due_at) ||
+          a.created_at.localeCompare(b.created_at)
+        );
+      return { results };
+    }
     if (sql.startsWith('SELECT * FROM todos WHERE due_at')) {
       const [start, end] = this.params;
       const results = this.db.todos
@@ -297,6 +321,42 @@ test('Worker todo API creates todos and groups monthly lists by status', async (
   const listed = await authenticatedRequest(db, '/api/todos?month=2026-06');
   assert.deepEqual(listed.body.pending, []);
   assert.equal(listed.body.completed[0].title, '写周报');
+});
+
+test('Worker todo monthly list uses status-scoped queries', async () => {
+  const db = new FakeD1();
+
+  db.todos.push(
+    {
+      id: 1,
+      title: '未完成',
+      priority: 'high',
+      note: '',
+      due_at: '2026-06-11T09:00:00',
+      status: 'pending',
+      created_at: '2026-06-01T09:00:00',
+      updated_at: '2026-06-01T09:00:00',
+      completed_at: null
+    },
+    {
+      id: 2,
+      title: '已完成',
+      priority: 'low',
+      note: '',
+      due_at: '2026-06-10T09:00:00',
+      status: 'completed',
+      created_at: '2026-06-01T09:00:00',
+      updated_at: '2026-06-02T09:00:00',
+      completed_at: '2026-06-02T09:00:00'
+    }
+  );
+
+  const listed = await authenticatedRequest(db, '/api/todos?month=2026-06');
+
+  assert.deepEqual(listed.body.pending.map((item) => item.title), ['未完成']);
+  assert.deepEqual(listed.body.completed.map((item) => item.title), ['已完成']);
+  assert.ok(db.sqlLog.some((sql) => sql.includes("WHERE status='pending' AND due_at >= ? AND due_at < ?")));
+  assert.ok(db.sqlLog.some((sql) => sql.includes("WHERE status='completed' AND due_at >= ? AND due_at < ?")));
 });
 
 test('Worker notes API creates notes and lists newest first', async () => {

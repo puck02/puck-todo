@@ -204,6 +204,22 @@ class TodoStore:
             if "note" not in columns:
                 conn.execute("ALTER TABLE todos ADD COLUMN note TEXT NOT NULL DEFAULT ''")
             conn.execute("""
+                CREATE TABLE IF NOT EXISTS notes (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    title TEXT NOT NULL,
+                    body TEXT NOT NULL DEFAULT '',
+                    type TEXT NOT NULL DEFAULT 'file',
+                    parent_id INTEGER,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                )
+            """)
+            note_columns = {row[1] for row in conn.execute("PRAGMA table_info(notes)").fetchall()}
+            if "type" not in note_columns:
+                conn.execute("ALTER TABLE notes ADD COLUMN type TEXT NOT NULL DEFAULT 'file'")
+            if "parent_id" not in note_columns:
+                conn.execute("ALTER TABLE notes ADD COLUMN parent_id INTEGER")
+            conn.execute("""
                 CREATE TABLE IF NOT EXISTS countdowns (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     title TEXT NOT NULL,
@@ -222,7 +238,10 @@ class TodoStore:
                 conn.execute("ALTER TABLE countdowns ADD COLUMN repeat_month INTEGER")
             if "repeat_day" not in countdown_columns:
                 conn.execute("ALTER TABLE countdowns ADD COLUMN repeat_day INTEGER")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_todos_status_due_at ON todos(status, due_at, created_at)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_notes_parent_type_updated_created ON notes(parent_id, type, updated_at DESC, created_at DESC)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_countdowns_target_date ON countdowns(target_date)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_countdowns_target_date_created ON countdowns(target_date, created_at)")
             conn.commit()
 
     def create_todo(self, title: str, priority: str, due_at: str, note: str = "") -> dict[str, Any]:
@@ -253,17 +272,23 @@ class TodoStore:
     def list_month(self, month: str) -> dict[str, Any]:
         start, end = month_range(month)
         with self.connect() as conn:
-            rows = conn.execute(
+            pending_rows = conn.execute(
                 """
-                SELECT * FROM todos WHERE due_at >= ? AND due_at < ?
+                SELECT * FROM todos WHERE status='pending' AND due_at >= ? AND due_at < ?
                 ORDER BY CASE priority WHEN 'urgent' THEN 4 WHEN 'high' THEN 3 WHEN 'medium' THEN 2 ELSE 1 END DESC,
                          due_at ASC, created_at ASC
                 """,
                 (start, end),
             ).fetchall()
-        pending = [normalize(r) for r in rows if r["status"] == "pending"]
-        completed = [normalize(r) for r in rows if r["status"] == "completed"]
-        completed.sort(key=lambda x: x.get("completed_at") or "", reverse=True)
+            completed_rows = conn.execute(
+                """
+                SELECT * FROM todos WHERE status='completed' AND due_at >= ? AND due_at < ?
+                ORDER BY completed_at DESC, due_at ASC, created_at ASC
+                """,
+                (start, end),
+            ).fetchall()
+        pending = [normalize(r) for r in pending_rows]
+        completed = [normalize(r) for r in completed_rows]
         return {"month": month, "pending": pending, "completed": completed}
 
     def update_todo(self, todo_id: int, payload: dict[str, Any]) -> dict[str, Any]:

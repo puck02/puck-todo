@@ -33,6 +33,14 @@ class TodoCoreTests(unittest.TestCase):
 
         self.assertEqual(month["pending"][0]["note"], note)
 
+    def test_store_creates_indexes_for_common_list_queries(self):
+        with self.store.connect() as conn:
+            indexes = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='index'")}
+
+        self.assertIn("idx_todos_status_due_at", indexes)
+        self.assertIn("idx_notes_parent_type_updated_created", indexes)
+        self.assertIn("idx_countdowns_target_date_created", indexes)
+
     def test_daily_reminder_returns_today_and_low_frequency_future_important(self):
         now = datetime(2026, 5, 11, 8, 30)
         today_due = now.replace(hour=20, minute=0)

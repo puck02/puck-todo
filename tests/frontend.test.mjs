@@ -141,7 +141,7 @@ test('todo add and delete interactions use transitions with operation lockout', 
   assert.ok(optimisticAdd > submitHandler, 'submit handler should create an optimistic todo');
   assert.ok(createRequest > optimisticAdd, 'optimistic todo should render before POST finishes');
 
-  const deleteHandler = app.indexOf("del.addEventListener('click'");
+  const deleteHandler = app.indexOf('async function deleteTodo');
   const deleteTransition = app.indexOf('removeTodoWithTransition(item.id)', deleteHandler);
   const deleteRequest = app.indexOf("method: 'DELETE'", deleteHandler);
   assert.ok(deleteHandler >= 0, 'delete click handler should exist');
@@ -153,4 +153,16 @@ test('todo add and delete interactions use transitions with operation lockout', 
   assert.match(style, /\.todo-locked/);
   assert.match(style, /\.todo-item\.entering/);
   assert.match(style, /\.todo-item\.leaving/);
+});
+
+test('frontend avoids repeated heavy work during list and editor interactions', async () => {
+  const app = await readFile(new URL('../static/app.js', import.meta.url), 'utf8');
+
+  assert.match(app, /todoMarkdownCache/);
+  assert.match(app, /function\s+renderMarkdownCached/);
+  assert.match(app, /pendingList\.addEventListener\('click', handleTodoListClick\)/);
+  assert.match(app, /completedList\.addEventListener\('click', handleTodoListClick\)/);
+  assert.match(app, /function\s+scheduleNotePreviewUpdate/);
+  assert.match(app, /requestAnimationFrame\(.*updateNotePreview/s);
+  assert.match(app, /noteMarkdownInput\.addEventListener\('input', scheduleNotePreviewUpdate\)/);
 });

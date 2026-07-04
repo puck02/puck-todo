@@ -624,8 +624,6 @@ class TodoStore:
         return {"ok": cur.rowcount > 0}
 
     def reorder_study_plan_items(self, plan_id: int, item_ids: list[int]) -> dict[str, Any]:
-        if not item_ids:
-            return self.get_study_plan(plan_id)
         now = now_local().isoformat()
         with self.connect() as conn:
             plan = conn.execute("SELECT * FROM study_plans WHERE id=?", (plan_id,)).fetchone()
@@ -633,8 +631,12 @@ class TodoStore:
                 raise KeyError("学习计划不存在")
             rows = conn.execute("SELECT id FROM study_plan_items WHERE plan_id=?", (plan_id,)).fetchall()
             existing_ids = [row["id"] for row in rows]
+            if not item_ids:
+                if existing_ids:
+                    raise ValueError("章节排序数据不完整")
+                return self.normalize_study_plan(plan, [])
             if set(item_ids) != set(existing_ids) or len(item_ids) != len(existing_ids):
-                raise ValueError("章节顺序不完整")
+                raise ValueError("章节排序数据不完整")
             for position, item_id in enumerate(item_ids, start=1):
                 conn.execute(
                     "UPDATE study_plan_items SET position=?, updated_at=? WHERE id=?",

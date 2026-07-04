@@ -166,6 +166,8 @@ class TodoCoreTests(unittest.TestCase):
         other_plan = self.store.create_study_plan("660")
         other_item = self.store.create_study_plan_item(other_plan["id"], "选择题")
 
+        with self.assertRaisesRegex(ValueError, "^章节排序数据不完整$"):
+            self.store.reorder_study_plan_items(plan["id"], [])
         with self.assertRaises(ValueError):
             self.store.reorder_study_plan_items(plan["id"], [first["id"]])
         with self.assertRaises(ValueError):
@@ -201,6 +203,9 @@ class TodoCoreTests(unittest.TestCase):
         item_queries = [statement for statement in select_statements if "FROM study_plan_items" in statement]
 
         self.assertEqual([plan["title"] for plan in listed["plans"]], ["880", "660"])
+        plans_by_title = {plan["title"]: plan for plan in listed["plans"]}
+        self.assertEqual([item["title"] for item in plans_by_title["660"]["items"]], ["基础篇"])
+        self.assertEqual([item["title"] for item in plans_by_title["880"]["items"]], ["强化篇"])
         self.assertEqual(len(item_queries), 1)
 
     def test_store_creates_study_plan_indexes(self):

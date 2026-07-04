@@ -537,7 +537,6 @@ test('study plans page wires API progress and reorder interactions', async () =>
 
 test('study plans interactions render safely update progress and guard reorder', async () => {
   const document = createStudyDocument();
-  const requests = [];
   const reorderBodies = [];
   let failNextItemPatch = false;
   let nextItemId = 103;
@@ -595,7 +594,6 @@ test('study plans interactions render safely update progress and guard reorder',
     fetch: async (path, options = {}) => {
       const method = options.method || 'GET';
       const body = options.body ? JSON.parse(options.body) : null;
-      requests.push({ path, method, body });
 
       if (path === '/api/study-plans' && method === 'GET') return jsonResponse({ plans: deepClone(plans) });
 

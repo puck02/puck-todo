@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="description" content="Puck Office 学习计划。" />
+  <meta name="theme-color" content="#f4f0e8" />
+  <title>Puck Office · 学习计划</title>
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+  <link rel="stylesheet" href="/style.css" />
+</head>
+<body data-page="study">
+  <a class="skip-link" href="#content">跳到内容</a>
+  <header class="topbar">
+    <div class="topbar-inner">
+      <a class="brand" href="/">Puck Office</a>
+      <nav class="main-nav" aria-label="主导航">
+        <a href="/">待办</a>
+        <a href="/countdowns.html">倒数日</a>
+        <a class="active" href="/study.html" aria-current="page">学习计划</a>
+        <a href="/notes.html">笔记</a>
+      </nav>
+      <button id="logoutButton" class="logout-btn" type="button">退出</button>
+    </div>
+  </header>
+
+  <main id="content" class="shell">
+    <section class="page-head">
+      <div>
+        <p class="eyebrow">Study</p>
+        <h1>学习计划</h1>
+      </div>
+    </section>
+
+    <section class="panel composer">
+      <div class="panel-head compact-head">
+        <h2>新增计划</h2>
+      </div>
+      <form id="studyPlanForm" class="form-grid study-plan-form">
+        <label class="field title-field">
+          <span>计划名称</span>
+          <input id="studyPlanTitleInput" type="text" maxlength="120" placeholder="李林高数辅导讲义" required />
+        </label>
+        <button class="primary-btn" type="submit">添加</button>
+      </form>
+    </section>
+
+    <section class="panel list-panel study-panel">
+      <div class="panel-head">
+        <div>
+          <h2>全部计划</h2>
+          <p id="studyPlansMeta">Loading...</p>
+        </div>
+      </div>
+      <div id="studyPlansList" class="study-plans-list"></div>
+    </section>
+  </main>
+
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+  <script type="module" src="/app.js"></script>
+</body>
+</html>

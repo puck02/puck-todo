@@ -128,6 +128,33 @@ test('office UI includes a countdown page', async () => {
   assert.match(style, /\.countdown-value/);
 });
 
+test('office UI includes a study plans page', async () => {
+  const [homeHtml, notesHtml, countdownHtml, studyHtml, style] = await Promise.all([
+    readFile(new URL('../static/index.html', import.meta.url), 'utf8'),
+    readFile(new URL('../static/notes.html', import.meta.url), 'utf8'),
+    readFile(new URL('../static/countdowns.html', import.meta.url), 'utf8'),
+    readFile(new URL('../static/study.html', import.meta.url), 'utf8'),
+    readFile(new URL('../static/style.css', import.meta.url), 'utf8')
+  ]);
+
+  for (const html of [homeHtml, notesHtml, countdownHtml, studyHtml]) {
+    assert.match(html, /href="\/study\.html"/);
+    assert.match(html, />学习计划</);
+  }
+  assert.match(studyHtml, /data-page="study"/);
+  assert.match(studyHtml, /aria-current="page">学习计划</);
+  assert.match(studyHtml, /id="studyPlanForm"/);
+  assert.match(studyHtml, /id="studyPlanTitleInput"/);
+  assert.match(studyHtml, /id="studyPlansList"/);
+  assert.match(studyHtml, /id="studyPlansMeta"/);
+  assert.match(studyHtml, /type="module"/);
+
+  assert.match(style, /\.study-plan-card/);
+  assert.match(style, /\.study-progress-bar/);
+  assert.match(style, /\.study-item-row/);
+  assert.match(style, /\.drag-handle/);
+});
+
 test('todo add and delete interactions use transitions with operation lockout', async () => {
   const [app, style] = await Promise.all([
     readFile(new URL('../static/app.js', import.meta.url), 'utf8'),

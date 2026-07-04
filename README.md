@@ -50,6 +50,9 @@ PATCH  /api/todos/{id}
 DELETE /api/todos/{id}
 POST   /api/todos/{id}/complete
 POST   /api/todos/{id}/uncomplete
+GET    /api/countdowns
+POST   /api/countdowns
+DELETE /api/countdowns/{id}
 GET    /api/notes
 POST   /api/notes
 GET    /api/notes/{id}

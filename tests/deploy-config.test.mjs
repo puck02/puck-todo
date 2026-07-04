@@ -51,6 +51,8 @@ test('Cloudflare deployment files are wired for Workers, D1, assets, and GitHub 
   assert.match(countdownFrequencyMigration, /ALTER TABLE countdowns ADD COLUMN event_type/);
   assert.match(countdownFrequencyMigration, /ALTER TABLE countdowns ADD COLUMN repeat_day/);
   assert.match(performanceMigration, /idx_todos_status_due_at/);
+  assert.match(performanceMigration, /idx_notes_parent_type_updated_created/);
+  assert.match(performanceMigration, /idx_countdowns_target_date_created/);
   assert.match(studyMigration, /CREATE TABLE IF NOT EXISTS study_plans/);
   assert.match(studyMigration, /CREATE TABLE IF NOT EXISTS study_plan_items/);
   assert.match(studyMigration, /idx_study_plan_items_plan_position/);

@@ -1,6 +1,369 @@
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import test from 'node:test';
+import vm from 'node:vm';
+
+const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
+
+function dataName(name) {
+  return name.replace(/^data-/, '').replace(/-([a-z])/g, (_match, letter) => letter.toUpperCase());
+}
+
+function decodeHtml(value = '') {
+  return String(value)
+    .replaceAll('&lt;', '<')
+    .replaceAll('&gt;', '>')
+    .replaceAll('&quot;', '"')
+    .replaceAll('&#39;', "'")
+    .replaceAll('&amp;', '&');
+}
+
+class FakeClassList {
+  constructor(element) {
+    this.element = element;
+    this.items = new Set();
+  }
+
+  set(value) {
+    this.items = new Set(String(value || '').split(/\s+/).filter(Boolean));
+  }
+
+  add(...tokens) {
+    for (const token of tokens) this.items.add(token);
+  }
+
+  remove(...tokens) {
+    for (const token of tokens) this.items.delete(token);
+  }
+
+  toggle(token, force) {
+    const enabled = force === undefined ? !this.items.has(token) : Boolean(force);
+    if (enabled) this.items.add(token);
+    else this.items.delete(token);
+    return enabled;
+  }
+
+  contains(token) {
+    return this.items.has(token);
+  }
+
+  toString() {
+    return [...this.items].join(' ');
+  }
+}
+
+class FakeEvent {
+  constructor(type, options = {}) {
+    this.type = type;
+    this.bubbles = options.bubbles ?? true;
+    this.dataTransfer = options.dataTransfer || null;
+    this.defaultPrevented = false;
+    this.target = options.target || null;
+    this.currentTarget = null;
+    this.stopped = false;
+  }
+
+  preventDefault() {
+    this.defaultPrevented = true;
+  }
+
+  stopPropagation() {
+    this.stopped = true;
+  }
+}
+
+class FakeElement {
+  constructor(tagName, ownerDocument) {
+    this.tagName = tagName.toUpperCase();
+    this.ownerDocument = ownerDocument;
+    this.parentNode = null;
+    this.children = [];
+    this.dataset = {};
+    this.attributes = new Map();
+    this.classList = new FakeClassList(this);
+    this.style = {};
+    this.eventListeners = new Map();
+    this._textContent = '';
+    this._innerHTML = '';
+    this.disabled = false;
+    this.value = '';
+    this.name = '';
+    this.id = '';
+    this.type = '';
+    this.draggable = false;
+  }
+
+  get className() {
+    return this.classList.toString();
+  }
+
+  set className(value) {
+    this.classList.set(value);
+    this.attributes.set('class', this.className);
+  }
+
+  get textContent() {
+    return this._textContent + this.children.map((child) => child.textContent).join('');
+  }
+
+  set textContent(value) {
+    this.children = [];
+    this._textContent = String(value ?? '');
+  }
+
+  get innerHTML() {
+    return this._innerHTML;
+  }
+
+  set innerHTML(value) {
+    const html = String(value ?? '');
+    this._innerHTML = html;
+    this.children = [];
+    this._textContent = '';
+    parseStudyHtml(this, html);
+  }
+
+  get elements() {
+    const controls = {};
+    for (const element of this.querySelectorAll('input, button, select, textarea')) {
+      if (element.name) controls[element.name] = element;
+    }
+    return controls;
+  }
+
+  setAttribute(name, value) {
+    const stringValue = String(value);
+    this.attributes.set(name, stringValue);
+    if (name === 'id') {
+      this.id = stringValue;
+      this.ownerDocument?.register(this);
+    } else if (name === 'class') {
+      this.className = stringValue;
+    } else if (name === 'disabled') {
+      this.disabled = true;
+    } else if (name === 'name') {
+      this.name = stringValue;
+    } else if (name === 'type') {
+      this.type = stringValue;
+    } else if (name.startsWith('data-')) {
+      this.dataset[dataName(name)] = stringValue;
+    } else {
+      this[name] = stringValue;
+    }
+  }
+
+  getAttribute(name) {
+    return this.attributes.get(name) || null;
+  }
+
+  append(...nodes) {
+    for (const node of nodes) this.appendChild(node);
+  }
+
+  appendChild(node) {
+    node.parentNode = this;
+    this.children.push(node);
+    return node;
+  }
+
+  replaceChildren(...nodes) {
+    this.children = [];
+    this.append(...nodes);
+  }
+
+  addEventListener(type, handler) {
+    if (!this.eventListeners.has(type)) this.eventListeners.set(type, []);
+    this.eventListeners.get(type).push(handler);
+  }
+
+  dispatchEvent(event) {
+    if (!event.target) event.target = this;
+    let node = this;
+    while (node) {
+      event.currentTarget = node;
+      for (const handler of node.eventListeners.get(event.type) || []) handler(event);
+      if (!event.bubbles || event.stopped) break;
+      node = node.parentNode;
+    }
+    return !event.defaultPrevented;
+  }
+
+  click() {
+    this.dispatchEvent(new FakeEvent('click'));
+  }
+
+  focus() {}
+
+  contains(node) {
+    for (let current = node; current; current = current.parentNode) {
+      if (current === this) return true;
+    }
+    return false;
+  }
+
+  closest(selector) {
+    for (let current = this; current; current = current.parentNode) {
+      if (matchesSelector(current, selector)) return current;
+    }
+    return null;
+  }
+
+  querySelector(selector) {
+    return this.querySelectorAll(selector)[0] || null;
+  }
+
+  querySelectorAll(selector) {
+    const selectors = selector.split(',').map((item) => item.trim()).filter(Boolean);
+    const results = [];
+    const visit = (node) => {
+      for (const child of node.children) {
+        if (selectors.some((item) => matchesSelector(child, item)) && !results.includes(child)) results.push(child);
+        visit(child);
+      }
+    };
+    visit(this);
+    return results;
+  }
+}
+
+class FakeDocument {
+  constructor() {
+    this.elementsById = new Map();
+    this.body = new FakeElement('body', this);
+  }
+
+  createElement(tagName) {
+    return new FakeElement(tagName, this);
+  }
+
+  createDocumentFragment() {
+    return new FakeElement('fragment', this);
+  }
+
+  register(element) {
+    if (element.id) this.elementsById.set(element.id, element);
+  }
+
+  getElementById(id) {
+    return this.elementsById.get(id) || null;
+  }
+
+  querySelector(selector) {
+    return this.querySelectorAll(selector)[0] || null;
+  }
+
+  querySelectorAll(selector) {
+    if (selector.startsWith('body[data-page="study"] ')) {
+      if (this.body.dataset.page !== 'study') return [];
+      return this.body.querySelectorAll(selector.slice('body[data-page="study"] '.length));
+    }
+    return matchesSelector(this.body, selector) ? [this.body, ...this.body.querySelectorAll(selector)] : this.body.querySelectorAll(selector);
+  }
+
+  addEventListener() {}
+}
+
+function parseAttributes(raw = '') {
+  const attrs = {};
+  const pattern = /([\w:-]+)(?:="([^"]*)")?/g;
+  let match;
+  while ((match = pattern.exec(raw))) attrs[match[1]] = match[2] ?? '';
+  return attrs;
+}
+
+function applyAttributes(element, attrs) {
+  for (const [name, value] of Object.entries(attrs)) element.setAttribute(name, value);
+}
+
+function createElementFromTag(parent, tagName, attrs = {}, text = '') {
+  const element = parent.ownerDocument.createElement(tagName);
+  applyAttributes(element, attrs);
+  element.textContent = decodeHtml(text);
+  return element;
+}
+
+function parseButtons(parent, html) {
+  const buttons = [];
+  const pattern = /<button\s+([^>]*)>([\s\S]*?)<\/button>/g;
+  let match;
+  while ((match = pattern.exec(html))) {
+    const button = createElementFromTag(parent, 'button', parseAttributes(match[1]), match[2]);
+    buttons.push(button);
+  }
+  return buttons;
+}
+
+function parseStudyHtml(parent, html) {
+  if (html.includes('data-study-action="edit-plan"')) {
+    parent.append(...parseButtons(parent, html));
+    return;
+  }
+
+  if (html.includes('name="title"') && html.includes('data-study-action') === false) {
+    const label = createElementFromTag(parent, 'label', { class: 'field' });
+    label.appendChild(createElementFromTag(parent, 'span', {}, '章节'));
+    const inputMatch = html.match(/<input\s+([^>]*)\/>/);
+    if (inputMatch) label.appendChild(createElementFromTag(parent, 'input', parseAttributes(inputMatch[1])));
+    parent.append(label, ...parseButtons(parent, html));
+    return;
+  }
+
+  if (html.includes('drag-handle')) {
+    const firstButtons = parseButtons(parent, html.split('<div class="study-item-actions">')[0]);
+    parent.append(...firstButtons);
+    const titleMatch = html.match(/<p class="study-item-title">([\s\S]*?)<\/p>/);
+    if (titleMatch) {
+      const title = createElementFromTag(parent, 'p', { class: 'study-item-title' }, titleMatch[1]);
+      if (titleMatch[1].includes('<img')) title.appendChild(createElementFromTag(parent, 'img'));
+      parent.appendChild(title);
+    }
+    const actions = createElementFromTag(parent, 'div', { class: 'study-item-actions' });
+    actions.append(...parseButtons(parent, html.match(/<div class="study-item-actions">([\s\S]*?)<\/div>/)?.[1] || ''));
+    parent.appendChild(actions);
+  }
+}
+
+function matchesSelector(element, selector) {
+  if (!element) return false;
+  if (selector.startsWith('#')) return element.id === selector.slice(1);
+  if (/^[a-z]+$/i.test(selector)) return element.tagName.toLowerCase() === selector.toLowerCase();
+  if (selector.startsWith('.')) {
+    return selector.slice(1).split('.').every((className) => element.classList.contains(className));
+  }
+
+  const attrMatch = selector.match(/^(?:([a-z]+))?\[([\w-]+)(?:=["']?([^"'\]]+)["']?)?\]$/i);
+  if (attrMatch) {
+    const [, tagName, attrName, attrValue] = attrMatch;
+    if (tagName && element.tagName.toLowerCase() !== tagName.toLowerCase()) return false;
+    const value = attrName.startsWith('data-') ? element.dataset[dataName(attrName)] : element.getAttribute(attrName);
+    return attrValue === undefined ? value !== undefined && value !== null : String(value) === attrValue;
+  }
+  return false;
+}
+
+function createStudyDocument() {
+  const document = new FakeDocument();
+  document.body.dataset.page = 'study';
+  const logout = document.createElement('button');
+  logout.setAttribute('id', 'logoutButton');
+  const toast = document.createElement('div');
+  toast.setAttribute('id', 'toast');
+  const form = document.createElement('form');
+  form.setAttribute('id', 'studyPlanForm');
+  const titleInput = document.createElement('input');
+  titleInput.setAttribute('id', 'studyPlanTitleInput');
+  form.appendChild(titleInput);
+  const meta = document.createElement('p');
+  meta.setAttribute('id', 'studyPlansMeta');
+  const list = document.createElement('div');
+  list.setAttribute('id', 'studyPlansList');
+  document.body.append(logout, form, meta, list, toast);
+  return document;
+}
+
+function deepClone(value) {
+  return JSON.parse(JSON.stringify(value));
+}
 
 test('office UI keeps todos and notes on separate pages', async () => {
   const [homeHtml, notesHtml, app, style] = await Promise.all([
@@ -170,6 +533,175 @@ test('study plans page wires API progress and reorder interactions', async () =>
   assert.match(app, /reorderStudyItems/);
   assert.match(app, /data-study-action="move-up"/);
   assert.match(app, /data-study-action="move-down"/);
+});
+
+test('study plans interactions render safely update progress and guard reorder', async () => {
+  const document = createStudyDocument();
+  const requests = [];
+  const reorderBodies = [];
+  let failNextItemPatch = false;
+  let nextItemId = 103;
+  const plans = [
+    {
+      id: 1,
+      title: '计划 A',
+      total_items: 2,
+      completed_items: 0,
+      progress_percent: 0,
+      items: [
+        { id: 101, plan_id: 1, title: '<img src=x onerror=alert(1)>', status: 'pending', position: 1, completed_at: null },
+        { id: 102, plan_id: 1, title: '第二章', status: 'pending', position: 2, completed_at: null }
+      ]
+    },
+    {
+      id: 2,
+      title: '计划 B',
+      total_items: 1,
+      completed_items: 0,
+      progress_percent: 0,
+      items: [
+        { id: 201, plan_id: 2, title: '跨计划章节', status: 'pending', position: 1, completed_at: null }
+      ]
+    }
+  ];
+
+  const syncPlanProgress = (plan) => {
+    plan.total_items = plan.items.length;
+    plan.completed_items = plan.items.filter((item) => item.status === 'completed').length;
+    plan.progress_percent = plan.total_items ? Math.round((plan.completed_items / plan.total_items) * 100) : 0;
+  };
+  const findServerItem = (itemId) => {
+    for (const plan of plans) {
+      const item = plan.items.find((entry) => entry.id === itemId);
+      if (item) return { plan, item };
+    }
+    return { plan: null, item: null };
+  };
+  const jsonResponse = (data, status = 200) => new Response(JSON.stringify(data), {
+    status,
+    headers: { 'Content-Type': 'application/json' }
+  });
+
+  const context = {
+    __markdown: await import(new URL('../static/markdown.js', import.meta.url)),
+    document,
+    Response,
+    URLSearchParams,
+    console,
+    confirm: () => true,
+    prompt: () => null,
+    setTimeout,
+    clearTimeout,
+    fetch: async (path, options = {}) => {
+      const method = options.method || 'GET';
+      const body = options.body ? JSON.parse(options.body) : null;
+      requests.push({ path, method, body });
+
+      if (path === '/api/study-plans' && method === 'GET') return jsonResponse({ plans: deepClone(plans) });
+
+      const reorderMatch = String(path).match(/^\/api\/study-plans\/(\d+)\/items\/reorder$/);
+      if (reorderMatch && method === 'POST') {
+        const plan = plans.find((entry) => entry.id === Number(reorderMatch[1]));
+        reorderBodies.push(body);
+        plan.items = body.item_ids.map((itemId) => plan.items.find((item) => item.id === itemId));
+        plan.items.forEach((item, index) => { item.position = index + 1; });
+        syncPlanProgress(plan);
+        return jsonResponse(deepClone(plan));
+      }
+
+      const addItemMatch = String(path).match(/^\/api\/study-plans\/(\d+)\/items$/);
+      if (addItemMatch && method === 'POST') {
+        const plan = plans.find((entry) => entry.id === Number(addItemMatch[1]));
+        const item = { id: nextItemId++, plan_id: plan.id, title: body.title, status: 'pending', position: plan.items.length + 1, completed_at: null };
+        plan.items.push(item);
+        syncPlanProgress(plan);
+        return jsonResponse(deepClone(item), 201);
+      }
+
+      const itemMatch = String(path).match(/^\/api\/study-plan-items\/(\d+)$/);
+      if (itemMatch && method === 'PATCH') {
+        if (failNextItemPatch) {
+          failNextItemPatch = false;
+          return jsonResponse({ error: '保存失败' }, 500);
+        }
+        const { plan, item } = findServerItem(Number(itemMatch[1]));
+        if ('status' in body) {
+          item.status = body.status;
+          item.completed_at = body.status === 'completed' ? '2026-07-04T13:00:00' : null;
+        }
+        if ('title' in body) item.title = body.title;
+        syncPlanProgress(plan);
+        return jsonResponse(deepClone(item));
+      }
+
+      if (itemMatch && method === 'DELETE') {
+        const { plan, item } = findServerItem(Number(itemMatch[1]));
+        plan.items = plan.items.filter((entry) => entry.id !== item.id);
+        syncPlanProgress(plan);
+        return jsonResponse({ ok: true });
+      }
+
+      return jsonResponse({ ok: true });
+    }
+  };
+  context.window = { location: { pathname: '/study.html', search: '', href: '' } };
+  context.window.window = context.window;
+
+  const app = await readFile(new URL('../static/app.js', import.meta.url), 'utf8');
+  const source = app.replace("import { escapeHtml, renderMarkdown } from '/markdown.js';", 'const { escapeHtml, renderMarkdown } = globalThis.__markdown;');
+  vm.runInNewContext(source, context, { filename: 'static/app.js' });
+  const settle = async () => {
+    for (let i = 0; i < 4; i += 1) await flush();
+  };
+  const planCard = (id = 1) => document.querySelector(`[data-plan-id="${id}"]`);
+  const planRows = (id = 1) => planCard(id).querySelectorAll('.study-item-row');
+  const progressText = () => planCard(1).querySelector('.study-progress-text').textContent;
+  const actionButton = (row, action) => row.querySelector(`[data-study-action="${action}"]`);
+
+  await settle();
+  assert.equal(progressText(), '0/2 · 0%');
+  assert.equal(document.querySelectorAll('img').length, 0);
+  assert.match(planRows()[0].querySelector('.study-item-title').textContent, /<img src=x/);
+
+  actionButton(planRows()[0], 'toggle-item').click();
+  await settle();
+  assert.equal(progressText(), '1/2 · 50%');
+  assert.equal(planCard(1).querySelectorAll('.study-item-row.completed').length, 1);
+  assert.equal(document.getElementById('studyPlanTitleInput').disabled, false);
+
+  failNextItemPatch = true;
+  actionButton(planRows()[0], 'toggle-item').click();
+  await settle();
+  assert.equal(progressText(), '1/2 · 50%');
+  assert.equal(planCard(1).querySelectorAll('.study-item-row.completed').length, 1);
+  assert.equal(document.getElementById('studyPlanTitleInput').disabled, false);
+
+  const addItemForm = planCard(1).querySelector('form[data-study-action="add-item"]');
+  addItemForm.elements.title.value = '第三章';
+  addItemForm.dispatchEvent(new FakeEvent('submit'));
+  await settle();
+  assert.equal(progressText(), '1/3 · 33%');
+  assert.ok(planRows().some((row) => row.textContent.includes('第三章')));
+
+  const addedRow = planRows().find((row) => row.textContent.includes('第三章'));
+  actionButton(addedRow, 'delete-item').click();
+  await settle();
+  assert.equal(progressText(), '1/2 · 50%');
+  assert.equal(planRows().some((row) => row.textContent.includes('第三章')), false);
+
+  actionButton(planRows()[1], 'move-up').click();
+  await settle();
+  assert.deepEqual(reorderBodies.at(-1), { item_ids: [102, 101] });
+  assert.match(planRows()[0].textContent, /第二章/);
+
+  const reorderCount = reorderBodies.length;
+  const draggedRow = planRows()[0];
+  const otherPlanRow = planRows(2)[0];
+  draggedRow.dispatchEvent(new FakeEvent('dragstart', { dataTransfer: { effectAllowed: '' } }));
+  otherPlanRow.dispatchEvent(new FakeEvent('drop'));
+  draggedRow.dispatchEvent(new FakeEvent('dragend'));
+  await settle();
+  assert.equal(reorderBodies.length, reorderCount);
 });
 
 test('todo add and delete interactions use transitions with operation lockout', async () => {

@@ -155,6 +155,23 @@ test('office UI includes a study plans page', async () => {
   assert.match(style, /\.drag-handle/);
 });
 
+test('study plans page wires API progress and reorder interactions', async () => {
+  const app = await readFile(new URL('../static/app.js', import.meta.url), 'utf8');
+
+  assert.match(app, /import \{ escapeHtml, renderMarkdown \} from '\/markdown\.js'/);
+  assert.match(app, /function\s+initStudyPage/);
+  assert.match(app, /\/api\/study-plans/);
+  assert.match(app, /\/api\/study-plan-items/);
+  assert.match(app, /function\s+studyProgress/);
+  assert.match(app, /study-progress-bar/);
+  assert.match(app, /study-item-row/);
+  assert.match(app, /dragstart/);
+  assert.match(app, /drop/);
+  assert.match(app, /reorderStudyItems/);
+  assert.match(app, /data-study-action="move-up"/);
+  assert.match(app, /data-study-action="move-down"/);
+});
+
 test('todo add and delete interactions use transitions with operation lockout', async () => {
   const [app, style] = await Promise.all([
     readFile(new URL('../static/app.js', import.meta.url), 'utf8'),

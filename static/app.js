@@ -1,4 +1,4 @@
-import { renderMarkdown } from '/markdown.js';
+import { escapeHtml, renderMarkdown } from '/markdown.js';
 
 const $ = (id) => document.getElementById(id);
 const page = document.body.dataset.page;
@@ -854,6 +854,356 @@ function initCountdownsPage() {
   loadCountdowns().catch(err => toast(err.message));
 }
 
+function studyProgress(plan) {
+  const items = plan.items || [];
+  const total = items.length;
+  const completed = items.filter((item) => item.status === 'completed').length;
+  return {
+    total,
+    completed,
+    percent: total ? Math.round((completed / total) * 100) : 0
+  };
+}
+
+function initStudyPage() {
+  const state = { plans: [], busy: false, draggedItemId: null, draggedPlanId: null };
+  const studyPlanForm = $('studyPlanForm');
+  const studyPlanTitleInput = $('studyPlanTitleInput');
+  const studyPlansMeta = $('studyPlansMeta');
+  const studyPlansList = $('studyPlansList');
+
+  function setStudyBusy(busy) {
+    state.busy = busy;
+    document.body.classList.toggle('study-locked', state.busy);
+    document.body.setAttribute('aria-busy', String(state.busy));
+    for (const el of document.querySelectorAll('body[data-page="study"] button, body[data-page="study"] input')) {
+      el.disabled = state.busy || el.dataset.orderBoundary === 'true';
+    }
+  }
+
+  function findPlan(planId) {
+    return state.plans.find((plan) => String(plan.id) === String(planId));
+  }
+
+  function findItem(itemId) {
+    for (const plan of state.plans) {
+      const item = (plan.items || []).find((entry) => String(entry.id) === String(itemId));
+      if (item) return { plan, item };
+    }
+    return { plan: null, item: null };
+  }
+
+  function updatePlanProgress(plan) {
+    const progress = studyProgress(plan);
+    plan.total_items = progress.total;
+    plan.completed_items = progress.completed;
+    plan.progress_percent = progress.percent;
+  }
+
+  function replacePlan(savedPlan) {
+    state.plans = state.plans.map((plan) => String(plan.id) === String(savedPlan.id) ? savedPlan : plan);
+  }
+
+  function renderStudyPlans() {
+    studyPlansMeta.textContent = `${state.plans.length} 个计划`;
+    if (!state.plans.length) {
+      const empty = document.createElement('div');
+      empty.className = 'empty';
+      empty.textContent = '暂无学习计划。';
+      studyPlansList.replaceChildren(empty);
+      setStudyBusy(state.busy);
+      return;
+    }
+
+    const fragment = document.createDocumentFragment();
+    for (const plan of state.plans) {
+      const progress = studyProgress(plan);
+      const card = document.createElement('article');
+      card.className = 'study-plan-card';
+      card.dataset.planId = String(plan.id);
+
+      const head = document.createElement('div');
+      head.className = 'study-plan-head';
+      const titleWrap = document.createElement('div');
+      const title = document.createElement('h2');
+      title.className = 'study-plan-title';
+      title.textContent = plan.title;
+      const progressWrap = document.createElement('div');
+      progressWrap.className = 'study-progress';
+      const progressText = document.createElement('p');
+      progressText.className = 'study-progress-text';
+      progressText.textContent = `${progress.completed}/${progress.total} · ${progress.percent}%`;
+      const progressTrack = document.createElement('div');
+      progressTrack.className = 'study-progress-track';
+      const progressBar = document.createElement('span');
+      progressBar.className = 'study-progress-bar';
+      progressBar.style.width = `${progress.percent}%`;
+      progressTrack.appendChild(progressBar);
+      progressWrap.append(progressText, progressTrack);
+      titleWrap.append(title, progressWrap);
+
+      const planActions = document.createElement('div');
+      planActions.className = 'actions';
+      planActions.innerHTML = `
+        <button class="icon-btn" type="button" data-study-action="edit-plan">编辑</button>
+        <button class="icon-btn danger" type="button" data-study-action="delete-plan">删除</button>
+      `;
+      head.append(titleWrap, planActions);
+
+      const itemForm = document.createElement('form');
+      itemForm.className = 'study-item-form';
+      itemForm.dataset.studyAction = 'add-item';
+      itemForm.innerHTML = `
+        <label class="field">
+          <span>章节</span>
+          <input name="title" type="text" maxlength="120" placeholder="函数、极限与连续" required />
+        </label>
+        <button class="ghost-action" type="submit">添加</button>
+      `;
+
+      const items = document.createElement('div');
+      items.className = 'study-items';
+      if (!plan.items?.length) {
+        const empty = document.createElement('div');
+        empty.className = 'empty';
+        empty.textContent = '暂无章节。';
+        items.appendChild(empty);
+      } else {
+        plan.items.forEach((item, index) => {
+          const safeTitle = escapeHtml(item.title);
+          const row = document.createElement('div');
+          row.className = `study-item-row ${item.status === 'completed' ? 'completed' : ''}`;
+          row.draggable = true;
+          row.dataset.itemId = String(item.id);
+          row.innerHTML = `
+            <button class="drag-handle" type="button" title="拖拽排序" aria-label="拖拽排序">⋮⋮</button>
+            <button class="check ${item.status === 'completed' ? 'done' : ''}" type="button" data-study-action="toggle-item" aria-label="切换完成：${safeTitle}"></button>
+            <p class="study-item-title">${safeTitle}</p>
+            <div class="study-item-actions">
+              <button class="icon-btn" type="button" data-study-action="move-up" ${index === 0 ? 'disabled data-order-boundary="true"' : ''}>上移</button>
+              <button class="icon-btn" type="button" data-study-action="move-down" ${index === plan.items.length - 1 ? 'disabled data-order-boundary="true"' : ''}>下移</button>
+              <button class="icon-btn" type="button" data-study-action="edit-item">编辑</button>
+              <button class="icon-btn danger" type="button" data-study-action="delete-item">删除</button>
+            </div>
+          `;
+          items.appendChild(row);
+        });
+      }
+
+      card.append(head, itemForm, items);
+      fragment.appendChild(card);
+    }
+    studyPlansList.replaceChildren(fragment);
+    setStudyBusy(state.busy);
+  }
+
+  async function loadStudyPlans() {
+    const data = await request('/api/study-plans');
+    state.plans = data.plans || [];
+    renderStudyPlans();
+  }
+
+  async function reorderStudyItems(plan, itemIds) {
+    if (state.busy || !plan) return;
+    const previous = [...(plan.items || [])];
+    const nextItems = itemIds.map((id) => previous.find((item) => String(item.id) === String(id)));
+    if (nextItems.some((item) => !item)) return;
+    setStudyBusy(true);
+    plan.items = nextItems;
+    updatePlanProgress(plan);
+    renderStudyPlans();
+    try {
+      const saved = await request(`/api/study-plans/${plan.id}/items/reorder`, {
+        method: 'POST',
+        body: JSON.stringify({ item_ids: itemIds.map(Number) })
+      });
+      replacePlan(saved);
+      renderStudyPlans();
+    } catch (err) {
+      plan.items = previous;
+      updatePlanProgress(plan);
+      renderStudyPlans();
+      toast(err.message);
+    } finally {
+      setStudyBusy(false);
+    }
+  }
+
+  studyPlanForm.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    if (state.busy) return;
+    const title = studyPlanTitleInput.value;
+    setStudyBusy(true);
+    try {
+      const plan = await request('/api/study-plans', { method: 'POST', body: JSON.stringify({ title }) });
+      state.plans = [plan, ...state.plans];
+      studyPlanTitleInput.value = '';
+      renderStudyPlans();
+      toast('已添加');
+    } catch (err) {
+      toast(err.message);
+    } finally {
+      setStudyBusy(false);
+    }
+  });
+
+  studyPlansList.addEventListener('submit', async (event) => {
+    const form = event.target.closest('form[data-study-action="add-item"]');
+    if (!form || state.busy) return;
+    event.preventDefault();
+    const card = form.closest('[data-plan-id]');
+    const plan = findPlan(card?.dataset.planId);
+    const input = form.elements.title;
+    if (!plan) return;
+    setStudyBusy(true);
+    try {
+      const item = await request(`/api/study-plans/${plan.id}/items`, { method: 'POST', body: JSON.stringify({ title: input.value }) });
+      plan.items = [...(plan.items || []), item];
+      updatePlanProgress(plan);
+      input.value = '';
+      renderStudyPlans();
+      toast('已添加章节');
+    } catch (err) {
+      toast(err.message);
+    } finally {
+      setStudyBusy(false);
+    }
+  });
+
+  studyPlansList.addEventListener('click', async (event) => {
+    const button = event.target.closest('button[data-study-action]');
+    if (!button || state.busy) return;
+    const card = button.closest('[data-plan-id]');
+    const plan = card ? findPlan(card.dataset.planId) : null;
+    const row = button.closest('[data-item-id]');
+    const action = button.dataset.studyAction;
+
+    try {
+      if (action === 'edit-plan' && plan) {
+        const title = prompt('计划名称', plan.title);
+        if (title === null) return;
+        setStudyBusy(true);
+        const saved = await request(`/api/study-plans/${plan.id}`, { method: 'PATCH', body: JSON.stringify({ title }) });
+        replacePlan(saved);
+        renderStudyPlans();
+        toast('已保存');
+      }
+
+      if (action === 'delete-plan' && plan) {
+        if (!confirm(`删除学习计划「${plan.title}」及其全部章节？`)) return;
+        setStudyBusy(true);
+        await request(`/api/study-plans/${plan.id}`, { method: 'DELETE' });
+        state.plans = state.plans.filter((item) => String(item.id) !== String(plan.id));
+        renderStudyPlans();
+        toast('已删除');
+      }
+
+      if (row && action === 'toggle-item') {
+        const { plan: itemPlan, item } = findItem(row.dataset.itemId);
+        if (!itemPlan || !item) return;
+        const previousItems = itemPlan.items.map((entry) => ({ ...entry }));
+        const status = item.status === 'completed' ? 'pending' : 'completed';
+        const completed_at = status === 'completed' ? new Date().toISOString().slice(0, 19) : null;
+        setStudyBusy(true);
+        Object.assign(item, { status, completed_at });
+        updatePlanProgress(itemPlan);
+        renderStudyPlans();
+        try {
+          const saved = await request(`/api/study-plan-items/${item.id}`, { method: 'PATCH', body: JSON.stringify({ status }) });
+          Object.assign(item, saved);
+          updatePlanProgress(itemPlan);
+          renderStudyPlans();
+        } catch (err) {
+          itemPlan.items = previousItems;
+          updatePlanProgress(itemPlan);
+          renderStudyPlans();
+          toast(err.message);
+        } finally {
+          setStudyBusy(false);
+        }
+      }
+
+      if (row && action === 'edit-item') {
+        const { item } = findItem(row.dataset.itemId);
+        if (!plan || !item) return;
+        const title = prompt('章节名称', item.title);
+        if (title === null) return;
+        setStudyBusy(true);
+        const saved = await request(`/api/study-plan-items/${item.id}`, { method: 'PATCH', body: JSON.stringify({ title }) });
+        Object.assign(item, saved);
+        renderStudyPlans();
+        toast('已保存');
+      }
+
+      if (row && action === 'delete-item') {
+        const { item } = findItem(row.dataset.itemId);
+        if (!plan || !item) return;
+        if (!confirm(`删除章节「${item.title}」？`)) return;
+        setStudyBusy(true);
+        await request(`/api/study-plan-items/${item.id}`, { method: 'DELETE' });
+        plan.items = plan.items.filter((entry) => String(entry.id) !== String(item.id));
+        updatePlanProgress(plan);
+        renderStudyPlans();
+        toast('已删除');
+      }
+
+      if (row && (action === 'move-up' || action === 'move-down')) {
+        if (!plan) return;
+        const index = plan.items.findIndex((item) => String(item.id) === row.dataset.itemId);
+        const targetIndex = action === 'move-up' ? index - 1 : index + 1;
+        if (index < 0 || targetIndex < 0 || targetIndex >= plan.items.length) return;
+        const next = [...plan.items];
+        [next[index], next[targetIndex]] = [next[targetIndex], next[index]];
+        await reorderStudyItems(plan, next.map((item) => item.id));
+      }
+    } catch (err) {
+      toast(err.message);
+    } finally {
+      if (action !== 'toggle-item') setStudyBusy(false);
+    }
+  });
+
+  studyPlansList.addEventListener('dragstart', (event) => {
+    const row = event.target.closest('.study-item-row');
+    const card = row?.closest('[data-plan-id]');
+    if (!row || !card || state.busy) return;
+    state.draggedItemId = row.dataset.itemId;
+    state.draggedPlanId = card.dataset.planId;
+    row.classList.add('dragging');
+    if (event.dataTransfer) event.dataTransfer.effectAllowed = 'move';
+  });
+
+  studyPlansList.addEventListener('dragend', (event) => {
+    event.target.closest('.study-item-row')?.classList.remove('dragging');
+    state.draggedItemId = null;
+    state.draggedPlanId = null;
+  });
+
+  studyPlansList.addEventListener('dragover', (event) => {
+    if (!state.draggedItemId || state.busy) return;
+    const row = event.target.closest('.study-item-row');
+    const card = row?.closest('[data-plan-id]');
+    if (row && card?.dataset.planId === state.draggedPlanId) event.preventDefault();
+  });
+
+  studyPlansList.addEventListener('drop', async (event) => {
+    const targetRow = event.target.closest('.study-item-row');
+    const card = targetRow?.closest('[data-plan-id]');
+    if (!targetRow || !card || !state.draggedItemId || state.busy) return;
+    if (card.dataset.planId !== state.draggedPlanId || targetRow.dataset.itemId === state.draggedItemId) return;
+    event.preventDefault();
+    const plan = findPlan(card.dataset.planId);
+    const ids = (plan?.items || []).map((item) => String(item.id));
+    const from = ids.indexOf(state.draggedItemId);
+    const to = ids.indexOf(targetRow.dataset.itemId);
+    if (from < 0 || to < 0) return;
+    ids.splice(to, 0, ids.splice(from, 1)[0]);
+    await reorderStudyItems(plan, ids);
+  });
+
+  loadStudyPlans().catch(err => toast(err.message));
+}
+
 function initNotesPage() {
   const state = { notes: [], path: [], parentId: null, contextItem: null };
   const folderView = $('folderView');
@@ -1076,6 +1426,10 @@ if (page === 'todos') {
 if (page === 'countdowns') {
   initLogoutButton();
   initCountdownsPage();
+}
+if (page === 'study') {
+  initLogoutButton();
+  initStudyPage();
 }
 if (page === 'notes') {
   initLogoutButton();

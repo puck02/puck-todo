@@ -521,8 +521,10 @@ async function updateStudyPlan(db, id, payload) {
 }
 
 async function deleteStudyPlan(db, id) {
-  await db.prepare('DELETE FROM study_plan_items WHERE plan_id=?').bind(id).run();
-  const result = await db.prepare('DELETE FROM study_plans WHERE id=?').bind(id).run();
+  const [, result] = await db.batch([
+    db.prepare('DELETE FROM study_plan_items WHERE plan_id=?').bind(id),
+    db.prepare('DELETE FROM study_plans WHERE id=?').bind(id)
+  ]);
   return { ok: result.meta.changes > 0 };
 }
 
@@ -538,12 +540,14 @@ async function createStudyPlanItem(db, planId, payload) {
   if (!plan) throw new HttpError('学习计划不存在', 404);
   const positionRow = await db.prepare('SELECT COALESCE(MAX(position), 0) + 1 AS position FROM study_plan_items WHERE plan_id=?').bind(planId).first();
   const now = nowIso();
-  const result = await db.prepare(`
-    INSERT INTO study_plan_items (plan_id, title, status, position, created_at, updated_at)
-    VALUES (?, ?, 'pending', ?, ?, ?)
-  `).bind(planId, data.title, positionRow.position, now, now).run();
-  await db.prepare('UPDATE study_plans SET updated_at=? WHERE id=?').bind(now, planId).run();
-  return getStudyPlanItem(db, result.meta.last_row_id);
+  const [insertResult] = await db.batch([
+    db.prepare(`
+      INSERT INTO study_plan_items (plan_id, title, status, position, created_at, updated_at)
+      VALUES (?, ?, 'pending', ?, ?, ?)
+    `).bind(planId, data.title, positionRow.position, now, now),
+    db.prepare('UPDATE study_plans SET updated_at=? WHERE id=?').bind(now, planId)
+  ]);
+  return getStudyPlanItem(db, insertResult.meta.last_row_id);
 }
 
 async function updateStudyPlanItem(db, id, payload) {
@@ -556,9 +560,11 @@ async function updateStudyPlanItem(db, id, payload) {
   if (updates.status === 'completed') updates.completed_at = now;
   if (updates.status === 'pending') updates.completed_at = null;
   const assignments = Object.keys(updates).map((key) => `${key}=?`).join(', ');
-  const result = await db.prepare(`UPDATE study_plan_items SET ${assignments} WHERE id=?`).bind(...Object.values(updates), id).run();
+  const [result] = await db.batch([
+    db.prepare(`UPDATE study_plan_items SET ${assignments} WHERE id=?`).bind(...Object.values(updates), id),
+    db.prepare('UPDATE study_plans SET updated_at=? WHERE id=?').bind(now, item.plan_id)
+  ]);
   if (!result.meta.changes) throw new HttpError('章节不存在', 404);
-  await db.prepare('UPDATE study_plans SET updated_at=? WHERE id=?').bind(now, item.plan_id).run();
   return getStudyPlanItem(db, id);
 }
 
@@ -566,8 +572,10 @@ async function deleteStudyPlanItem(db, id) {
   const row = await db.prepare('SELECT * FROM study_plan_items WHERE id=?').bind(id).first();
   if (!row) return { ok: false };
   const now = nowIso();
-  const result = await db.prepare('DELETE FROM study_plan_items WHERE id=?').bind(id).run();
-  await db.prepare('UPDATE study_plans SET updated_at=? WHERE id=?').bind(now, row.plan_id).run();
+  const [result] = await db.batch([
+    db.prepare('DELETE FROM study_plan_items WHERE id=?').bind(id),
+    db.prepare('UPDATE study_plans SET updated_at=? WHERE id=?').bind(now, row.plan_id)
+  ]);
   return { ok: result.meta.changes > 0 };
 }
 
@@ -588,10 +596,12 @@ async function reorderStudyPlanItems(db, planId, payload) {
     throw new HttpError('章节排序数据不完整');
   }
   const now = nowIso();
-  for (const [index, itemId] of itemIds.entries()) {
-    await db.prepare('UPDATE study_plan_items SET position=?, updated_at=? WHERE id=?').bind(index + 1, now, itemId).run();
-  }
-  await db.prepare('UPDATE study_plans SET updated_at=? WHERE id=?').bind(now, planId).run();
+  await db.batch([
+    ...itemIds.map((itemId, index) =>
+      db.prepare('UPDATE study_plan_items SET position=?, updated_at=? WHERE id=?').bind(index + 1, now, itemId)
+    ),
+    db.prepare('UPDATE study_plans SET updated_at=? WHERE id=?').bind(now, planId)
+  ]);
   return getStudyPlan(db, planId);
 }
 

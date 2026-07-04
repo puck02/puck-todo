@@ -22,11 +22,36 @@ class FakeD1 {
     this.studyPlans = [];
     this.studyPlanItems = [];
     this.sqlLog = [];
+    this.failOnStudyPlanDeleteId = null;
+    this.failOnStudyPlanItemUpdateId = null;
   }
 
   prepare(sql) {
     this.sqlLog.push(sql.replace(/\s+/g, ' ').trim());
     return new FakeStatement(this, sql);
+  }
+
+  async batch(statements) {
+    const snapshot = {
+      nextTodoId: this.nextTodoId,
+      nextNoteId: this.nextNoteId,
+      nextCountdownId: this.nextCountdownId,
+      nextStudyPlanId: this.nextStudyPlanId,
+      nextStudyPlanItemId: this.nextStudyPlanItemId,
+      todos: structuredClone(this.todos),
+      notes: structuredClone(this.notes),
+      countdowns: structuredClone(this.countdowns),
+      studyPlans: structuredClone(this.studyPlans),
+      studyPlanItems: structuredClone(this.studyPlanItems)
+    };
+    try {
+      const results = [];
+      for (const statement of statements) results.push(await statement.run());
+      return results;
+    } catch (error) {
+      Object.assign(this, snapshot);
+      throw error;
+    }
   }
 }
 
@@ -268,6 +293,7 @@ class FakeStatement {
     }
     if (sql.startsWith('DELETE FROM study_plans WHERE id=')) {
       const [id] = this.params;
+      if (this.db.failOnStudyPlanDeleteId === id) throw new Error('Simulated study plan delete failure');
       const before = this.db.studyPlans.length;
       this.db.studyPlans = this.db.studyPlans.filter((plan) => plan.id !== id);
       return { meta: { changes: before - this.db.studyPlans.length } };
@@ -290,6 +316,7 @@ class FakeStatement {
     }
     if (sql.startsWith('UPDATE study_plan_items SET')) {
       const id = this.params[this.params.length - 1];
+      if (this.db.failOnStudyPlanItemUpdateId === id) throw new Error('Simulated study item update failure');
       const item = this.db.studyPlanItems.find((entry) => entry.id === id);
       if (!item) return { meta: { changes: 0 } };
       applyUpdate(sql, this.params, item);
@@ -755,4 +782,50 @@ test('Worker study plan API manages plans items progress and reorder', async () 
   });
   assert.equal(emptyReorder.res.status, 200);
   assert.deepEqual(emptyReorder.body.items, []);
+});
+
+test('Worker study plan writes roll back on multi-statement failures', async () => {
+  const reorderDb = new FakeD1();
+  const plan = await authenticatedRequest(reorderDb, '/api/study-plans', {
+    method: 'POST',
+    body: JSON.stringify({ title: '高数' })
+  });
+  const first = await authenticatedRequest(reorderDb, `/api/study-plans/${plan.body.id}/items`, {
+    method: 'POST',
+    body: JSON.stringify({ title: '第一章' })
+  });
+  const second = await authenticatedRequest(reorderDb, `/api/study-plans/${plan.body.id}/items`, {
+    method: 'POST',
+    body: JSON.stringify({ title: '第二章' })
+  });
+
+  reorderDb.failOnStudyPlanItemUpdateId = first.body.id;
+  const failedReorder = await authenticatedRequest(reorderDb, `/api/study-plans/${plan.body.id}/items/reorder`, {
+    method: 'POST',
+    body: JSON.stringify({ item_ids: [second.body.id, first.body.id] })
+  });
+  assert.equal(failedReorder.res.status, 500);
+  assert.deepEqual(
+    reorderDb.studyPlanItems
+      .filter((item) => item.plan_id === plan.body.id)
+      .sort(sortStudyPlanItems)
+      .map((item) => [item.id, item.position]),
+    [[first.body.id, 1], [second.body.id, 2]]
+  );
+
+  const deleteDb = new FakeD1();
+  const deletePlan = await authenticatedRequest(deleteDb, '/api/study-plans', {
+    method: 'POST',
+    body: JSON.stringify({ title: '线代' })
+  });
+  const deleteItem = await authenticatedRequest(deleteDb, `/api/study-plans/${deletePlan.body.id}/items`, {
+    method: 'POST',
+    body: JSON.stringify({ title: '行列式' })
+  });
+
+  deleteDb.failOnStudyPlanDeleteId = deletePlan.body.id;
+  const failedDelete = await authenticatedRequest(deleteDb, `/api/study-plans/${deletePlan.body.id}`, { method: 'DELETE' });
+  assert.equal(failedDelete.res.status, 500);
+  assert.ok(deleteDb.studyPlans.some((item) => item.id === deletePlan.body.id));
+  assert.ok(deleteDb.studyPlanItems.some((item) => item.id === deleteItem.body.id));
 });

@@ -14,9 +14,13 @@ class FakeD1 {
     this.nextTodoId = 1;
     this.nextNoteId = 1;
     this.nextCountdownId = 1;
+    this.nextStudyPlanId = 1;
+    this.nextStudyPlanItemId = 1;
     this.todos = [];
     this.notes = [];
     this.countdowns = [];
+    this.studyPlans = [];
+    this.studyPlanItems = [];
     this.sqlLog = [];
   }
 
@@ -106,6 +110,33 @@ class FakeStatement {
         )
       };
     }
+    if (sql.startsWith('SELECT * FROM study_plans ORDER BY')) {
+      return {
+        results: [...this.db.studyPlans].sort((a, b) =>
+          String(b.created_at).localeCompare(String(a.created_at)) ||
+          b.id - a.id
+        )
+      };
+    }
+    if (sql.startsWith('SELECT * FROM study_plan_items WHERE plan_id=')) {
+      const [planId] = this.params;
+      return {
+        results: this.db.studyPlanItems
+          .filter((item) => item.plan_id === planId)
+          .sort(sortStudyPlanItems)
+      };
+    }
+    if (sql.startsWith('SELECT * FROM study_plan_items ORDER BY')) {
+      return { results: [...this.db.studyPlanItems].sort(sortStudyPlanItemsForList) };
+    }
+    if (sql.startsWith('SELECT id FROM study_plan_items WHERE plan_id=')) {
+      const [planId] = this.params;
+      return {
+        results: this.db.studyPlanItems
+          .filter((item) => item.plan_id === planId)
+          .map((item) => ({ id: item.id }))
+      };
+    }
     throw new Error(`Unexpected all SQL: ${sql}`);
   }
 
@@ -119,6 +150,23 @@ class FakeStatement {
     }
     if (sql.startsWith('SELECT * FROM countdowns WHERE id=')) {
       return this.db.countdowns.find((item) => item.id === this.params[0]) || null;
+    }
+    if (sql.startsWith('SELECT * FROM study_plans WHERE id=')) {
+      return this.db.studyPlans.find((plan) => plan.id === this.params[0]) || null;
+    }
+    if (sql.startsWith('SELECT id FROM study_plans WHERE id=')) {
+      const plan = this.db.studyPlans.find((item) => item.id === this.params[0]);
+      return plan ? { id: plan.id } : null;
+    }
+    if (sql.startsWith('SELECT * FROM study_plan_items WHERE id=')) {
+      return this.db.studyPlanItems.find((item) => item.id === this.params[0]) || null;
+    }
+    if (sql.startsWith('SELECT COALESCE(MAX(position), 0) + 1')) {
+      const [planId] = this.params;
+      const position = this.db.studyPlanItems
+        .filter((item) => item.plan_id === planId)
+        .reduce((max, item) => Math.max(max, item.position), 0) + 1;
+      return { position };
     }
     throw new Error(`Unexpected first SQL: ${sql}`);
   }
@@ -156,6 +204,27 @@ class FakeStatement {
       this.db.countdowns.push({ id, title, target_date, event_type, repeat_month, repeat_day, created_at: now, updated_at: now });
       return { meta: { last_row_id: id, changes: 1 } };
     }
+    if (sql.startsWith('INSERT INTO study_plans')) {
+      const [title, now] = this.params;
+      const id = this.db.nextStudyPlanId++;
+      this.db.studyPlans.push({ id, title, created_at: now, updated_at: now });
+      return { meta: { last_row_id: id, changes: 1 } };
+    }
+    if (sql.startsWith('INSERT INTO study_plan_items')) {
+      const [plan_id, title, position, now] = this.params;
+      const id = this.db.nextStudyPlanItemId++;
+      this.db.studyPlanItems.push({
+        id,
+        plan_id,
+        title,
+        status: 'pending',
+        position,
+        created_at: now,
+        updated_at: now,
+        completed_at: null
+      });
+      return { meta: { last_row_id: id, changes: 1 } };
+    }
     if (sql.startsWith('DELETE FROM notes WHERE id IN')) {
       const [id] = this.params;
       const ids = new Set([id]);
@@ -185,6 +254,24 @@ class FakeStatement {
       this.db.countdowns = this.db.countdowns.filter((item) => item.id !== id);
       return { meta: { changes: before - this.db.countdowns.length } };
     }
+    if (sql.startsWith('DELETE FROM study_plan_items WHERE plan_id=')) {
+      const [planId] = this.params;
+      const before = this.db.studyPlanItems.length;
+      this.db.studyPlanItems = this.db.studyPlanItems.filter((item) => item.plan_id !== planId);
+      return { meta: { changes: before - this.db.studyPlanItems.length } };
+    }
+    if (sql.startsWith('DELETE FROM study_plan_items WHERE id=')) {
+      const [id] = this.params;
+      const before = this.db.studyPlanItems.length;
+      this.db.studyPlanItems = this.db.studyPlanItems.filter((item) => item.id !== id);
+      return { meta: { changes: before - this.db.studyPlanItems.length } };
+    }
+    if (sql.startsWith('DELETE FROM study_plans WHERE id=')) {
+      const [id] = this.params;
+      const before = this.db.studyPlans.length;
+      this.db.studyPlans = this.db.studyPlans.filter((plan) => plan.id !== id);
+      return { meta: { changes: before - this.db.studyPlans.length } };
+    }
     if (sql.startsWith("UPDATE todos SET status='completed'")) {
       const [now, , id] = this.params;
       const todo = this.db.todos.find((item) => item.id === id);
@@ -192,6 +279,20 @@ class FakeStatement {
       todo.status = 'completed';
       todo.completed_at = now;
       todo.updated_at = now;
+      return { meta: { changes: 1 } };
+    }
+    if (sql.startsWith('UPDATE study_plans SET')) {
+      const id = this.params[this.params.length - 1];
+      const plan = this.db.studyPlans.find((item) => item.id === id);
+      if (!plan) return { meta: { changes: 0 } };
+      applyUpdate(sql, this.params, plan);
+      return { meta: { changes: 1 } };
+    }
+    if (sql.startsWith('UPDATE study_plan_items SET')) {
+      const id = this.params[this.params.length - 1];
+      const item = this.db.studyPlanItems.find((entry) => entry.id === id);
+      if (!item) return { meta: { changes: 0 } };
+      applyUpdate(sql, this.params, item);
       return { meta: { changes: 1 } };
     }
     throw new Error(`Unexpected run SQL: ${sql}`);
@@ -211,6 +312,28 @@ function sortNotes(a, b, sql = '') {
 
 function typeWeight(type) {
   return type === 'folder' ? 0 : 1;
+}
+
+function sortStudyPlanItems(a, b) {
+  return a.position - b.position || String(a.created_at).localeCompare(String(b.created_at));
+}
+
+function sortStudyPlanItemsForList(a, b) {
+  return a.plan_id - b.plan_id || sortStudyPlanItems(a, b);
+}
+
+function applyUpdate(sql, params, target) {
+  const [, setClause = ''] = sql.match(/SET (.+) WHERE id=\?/) || [];
+  let paramIndex = 0;
+  for (const assignment of setClause.split(',').map((item) => item.trim())) {
+    const [column, rawValue] = assignment.split('=').map((item) => item.trim());
+    if (rawValue === '?') {
+      target[column] = params[paramIndex];
+      paramIndex += 1;
+    } else if (rawValue.toUpperCase() === 'NULL') {
+      target[column] = null;
+    }
+  }
 }
 
 async function request(db, path, options = {}, env = TEST_AUTH_ENV) {
@@ -476,4 +599,127 @@ test('Worker notes API supports nested folders and files', async () => {
   const afterDelete = await authenticatedRequest(db, '/api/notes');
   assert.deepEqual(afterDelete.body.notes.map((item) => item.title), ['根文件']);
   assert.equal(db.notes.length, 1);
+});
+
+test('Worker study plan API manages plans items progress and reorder', async () => {
+  const db = new FakeD1();
+
+  const denied = await request(db, '/api/study-plans');
+  assert.equal(denied.res.status, 401);
+
+  const created = await authenticatedRequest(db, '/api/study-plans', {
+    method: 'POST',
+    body: JSON.stringify({ title: '李林高数辅导讲义' })
+  });
+  assert.equal(created.res.status, 201);
+  assert.equal(created.body.title, '李林高数辅导讲义');
+  assert.equal(created.body.progress_percent, 0);
+  assert.equal(created.body.total_items, 0);
+  assert.deepEqual(created.body.items, []);
+
+  const first = await authenticatedRequest(db, `/api/study-plans/${created.body.id}/items`, {
+    method: 'POST',
+    body: JSON.stringify({ title: '函数、极限与连续' })
+  });
+  assert.equal(first.res.status, 201);
+  assert.equal(first.body.status, 'pending');
+  assert.equal(first.body.completed_at, null);
+
+  const second = await authenticatedRequest(db, `/api/study-plans/${created.body.id}/items`, {
+    method: 'POST',
+    body: JSON.stringify({ title: '导数与微分' })
+  });
+  assert.equal(second.res.status, 201);
+
+  const completed = await authenticatedRequest(db, `/api/study-plan-items/${first.body.id}`, {
+    method: 'PATCH',
+    body: JSON.stringify({ status: 'completed' })
+  });
+  assert.equal(completed.res.status, 200);
+  assert.equal(completed.body.status, 'completed');
+  assert.ok(completed.body.completed_at);
+
+  const reordered = await authenticatedRequest(db, `/api/study-plans/${created.body.id}/items/reorder`, {
+    method: 'POST',
+    body: JSON.stringify({ item_ids: [second.body.id, first.body.id] })
+  });
+  assert.equal(reordered.res.status, 200);
+  assert.deepEqual(reordered.body.items.map((item) => item.title), ['导数与微分', '函数、极限与连续']);
+
+  const listed = await authenticatedRequest(db, '/api/study-plans');
+  assert.equal(listed.res.status, 200);
+  assert.equal(listed.body.plans[0].total_items, 2);
+  assert.equal(listed.body.plans[0].completed_items, 1);
+  assert.equal(listed.body.plans[0].progress_percent, 50);
+  assert.deepEqual(listed.body.plans[0].items.map((item) => item.title), ['导数与微分', '函数、极限与连续']);
+
+  const renamed = await authenticatedRequest(db, `/api/study-plans/${created.body.id}`, {
+    method: 'PATCH',
+    body: JSON.stringify({ title: '880高数' })
+  });
+  assert.equal(renamed.res.status, 200);
+  assert.equal(renamed.body.title, '880高数');
+
+  const itemDeleted = await authenticatedRequest(db, `/api/study-plan-items/${second.body.id}`, { method: 'DELETE' });
+  assert.equal(itemDeleted.res.status, 200);
+  assert.deepEqual(itemDeleted.body, { ok: true });
+
+  const planDeleted = await authenticatedRequest(db, `/api/study-plans/${created.body.id}`, { method: 'DELETE' });
+  assert.equal(planDeleted.res.status, 200);
+  assert.deepEqual(planDeleted.body, { ok: true });
+
+  const afterDelete = await authenticatedRequest(db, '/api/study-plans');
+  assert.deepEqual(afterDelete.body.plans, []);
+
+  const validationDb = new FakeD1();
+  const plan = await authenticatedRequest(validationDb, '/api/study-plans', {
+    method: 'POST',
+    body: JSON.stringify({ title: '880' })
+  });
+  const base = await authenticatedRequest(validationDb, `/api/study-plans/${plan.body.id}/items`, {
+    method: 'POST',
+    body: JSON.stringify({ title: '基础篇' })
+  });
+  const advanced = await authenticatedRequest(validationDb, `/api/study-plans/${plan.body.id}/items`, {
+    method: 'POST',
+    body: JSON.stringify({ title: '强化篇' })
+  });
+  const otherPlan = await authenticatedRequest(validationDb, '/api/study-plans', {
+    method: 'POST',
+    body: JSON.stringify({ title: '660' })
+  });
+  const otherItem = await authenticatedRequest(validationDb, `/api/study-plans/${otherPlan.body.id}/items`, {
+    method: 'POST',
+    body: JSON.stringify({ title: '选择题' })
+  });
+
+  const invalidOrders = [
+    [],
+    [base.body.id],
+    [base.body.id, base.body.id],
+    [base.body.id, otherItem.body.id]
+  ];
+  for (const item_ids of invalidOrders) {
+    const invalid = await authenticatedRequest(validationDb, `/api/study-plans/${plan.body.id}/items/reorder`, {
+      method: 'POST',
+      body: JSON.stringify({ item_ids })
+    });
+    assert.equal(invalid.res.status, 400);
+    assert.equal(invalid.body.error, '章节排序数据不完整');
+  }
+
+  const unchanged = await authenticatedRequest(validationDb, '/api/study-plans');
+  const validatedPlan = unchanged.body.plans.find((item) => item.id === plan.body.id);
+  assert.deepEqual(validatedPlan.items.map((item) => item.id), [base.body.id, advanced.body.id]);
+
+  const emptyPlan = await authenticatedRequest(validationDb, '/api/study-plans', {
+    method: 'POST',
+    body: JSON.stringify({ title: '空计划' })
+  });
+  const emptyReorder = await authenticatedRequest(validationDb, `/api/study-plans/${emptyPlan.body.id}/items/reorder`, {
+    method: 'POST',
+    body: JSON.stringify({ item_ids: [] })
+  });
+  assert.equal(emptyReorder.res.status, 200);
+  assert.deepEqual(emptyReorder.body.items, []);
 });

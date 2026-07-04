@@ -1,6 +1,7 @@
 const PRIORITY_WEIGHT = { urgent: 4, high: 3, medium: 2, low: 1 };
 const VALID_PRIORITIES = new Set(Object.keys(PRIORITY_WEIGHT));
 const VALID_STATUS = new Set(['pending', 'completed']);
+const VALID_STUDY_ITEM_STATUS = new Set(['pending', 'completed']);
 const VALID_NOTE_TYPES = new Set(['file', 'folder']);
 const VALID_COUNTDOWN_TYPES = new Set(['once', 'monthly', 'anniversary']);
 const SESSION_COOKIE = 'puck_session';
@@ -173,6 +174,26 @@ function normalizeCountdown(row) {
   };
 }
 
+function normalizeStudyPlan(row, items = []) {
+  const total_items = items.length;
+  const completed_items = items.filter((item) => item.status === 'completed').length;
+  return {
+    ...row,
+    items,
+    total_items,
+    completed_items,
+    progress_percent: total_items ? Math.round((completed_items / total_items) * 100) : 0
+  };
+}
+
+function normalizeStudyPlanItem(row) {
+  return {
+    ...row,
+    status: row.status || 'pending',
+    completed_at: row.completed_at ?? null
+  };
+}
+
 function monthRange(month) {
   if (!/^\d{4}-\d{2}$/.test(month)) throw new HttpError('月份格式必须是 YYYY-MM');
   const [year, monthIndex] = month.split('-').map(Number);
@@ -290,6 +311,25 @@ function validateCountdownPayload(payload) {
   repeat_month = month;
   repeat_day = day;
   return { title, target_date, event_type, repeat_month, repeat_day };
+}
+
+function validateStudyPlanPayload(payload) {
+  const title = String(payload.title || '').trim();
+  if (!title) throw new HttpError('学习计划名称不能为空');
+  return { title };
+}
+
+function validateStudyPlanItemPayload(payload, partial = false) {
+  const updates = {};
+  if ('title' in payload || !partial) {
+    updates.title = String(payload.title || '').trim();
+    if (!updates.title) throw new HttpError('章节名称不能为空');
+  }
+  if ('status' in payload) {
+    updates.status = String(payload.status || '');
+    if (!VALID_STUDY_ITEM_STATUS.has(updates.status)) throw new HttpError('章节状态必须是 pending/completed');
+  }
+  return updates;
 }
 
 async function getTodo(db, id) {
@@ -447,6 +487,118 @@ async function deleteCountdown(db, id) {
   return { ok: result.meta.changes > 0 };
 }
 
+async function getStudyPlan(db, id) {
+  const row = await db.prepare('SELECT * FROM study_plans WHERE id=?').bind(id).first();
+  if (!row) throw new HttpError('学习计划不存在', 404);
+  const { results = [] } = await db.prepare('SELECT * FROM study_plan_items WHERE plan_id=? ORDER BY position ASC, created_at ASC').bind(id).all();
+  return normalizeStudyPlan(row, results.map(normalizeStudyPlanItem));
+}
+
+async function listStudyPlans(db) {
+  const [{ results: planRows = [] }, { results: itemRows = [] }] = await Promise.all([
+    db.prepare('SELECT * FROM study_plans ORDER BY created_at DESC, id DESC').all(),
+    db.prepare('SELECT * FROM study_plan_items ORDER BY plan_id ASC, position ASC, created_at ASC').all()
+  ]);
+  const itemsByPlan = new Map(planRows.map((plan) => [plan.id, []]));
+  for (const row of itemRows) {
+    if (itemsByPlan.has(row.plan_id)) itemsByPlan.get(row.plan_id).push(normalizeStudyPlanItem(row));
+  }
+  return { plans: planRows.map((plan) => normalizeStudyPlan(plan, itemsByPlan.get(plan.id))) };
+}
+
+async function createStudyPlan(db, payload) {
+  const data = validateStudyPlanPayload(payload);
+  const now = nowIso();
+  const result = await db.prepare('INSERT INTO study_plans (title, created_at, updated_at) VALUES (?, ?, ?)').bind(data.title, now, now).run();
+  return getStudyPlan(db, result.meta.last_row_id);
+}
+
+async function updateStudyPlan(db, id, payload) {
+  const updates = {};
+  if ('title' in payload) updates.title = validateStudyPlanPayload(payload).title;
+  if (!Object.keys(updates).length) return getStudyPlan(db, id);
+  updates.updated_at = nowIso();
+  const assignments = Object.keys(updates).map((key) => `${key}=?`).join(', ');
+  const result = await db.prepare(`UPDATE study_plans SET ${assignments} WHERE id=?`).bind(...Object.values(updates), id).run();
+  if (!result.meta.changes) throw new HttpError('学习计划不存在', 404);
+  return getStudyPlan(db, id);
+}
+
+async function deleteStudyPlan(db, id) {
+  await db.prepare('DELETE FROM study_plan_items WHERE plan_id=?').bind(id).run();
+  const result = await db.prepare('DELETE FROM study_plans WHERE id=?').bind(id).run();
+  return { ok: result.meta.changes > 0 };
+}
+
+async function getStudyPlanItem(db, id) {
+  const row = await db.prepare('SELECT * FROM study_plan_items WHERE id=?').bind(id).first();
+  if (!row) throw new HttpError('章节不存在', 404);
+  return normalizeStudyPlanItem(row);
+}
+
+async function createStudyPlanItem(db, planId, payload) {
+  const data = validateStudyPlanItemPayload(payload);
+  const plan = await db.prepare('SELECT id FROM study_plans WHERE id=?').bind(planId).first();
+  if (!plan) throw new HttpError('学习计划不存在', 404);
+  const positionRow = await db.prepare('SELECT COALESCE(MAX(position), 0) + 1 AS position FROM study_plan_items WHERE plan_id=?').bind(planId).first();
+  const now = nowIso();
+  const result = await db.prepare(`
+    INSERT INTO study_plan_items (plan_id, title, status, position, created_at, updated_at)
+    VALUES (?, ?, 'pending', ?, ?, ?)
+  `).bind(planId, data.title, positionRow.position, now, now).run();
+  await db.prepare('UPDATE study_plans SET updated_at=? WHERE id=?').bind(now, planId).run();
+  return getStudyPlanItem(db, result.meta.last_row_id);
+}
+
+async function updateStudyPlanItem(db, id, payload) {
+  const updates = validateStudyPlanItemPayload(payload, true);
+  const keys = Object.keys(updates);
+  if (!keys.length) return getStudyPlanItem(db, id);
+  const item = await getStudyPlanItem(db, id);
+  const now = nowIso();
+  updates.updated_at = now;
+  if (updates.status === 'completed') updates.completed_at = now;
+  if (updates.status === 'pending') updates.completed_at = null;
+  const assignments = Object.keys(updates).map((key) => `${key}=?`).join(', ');
+  const result = await db.prepare(`UPDATE study_plan_items SET ${assignments} WHERE id=?`).bind(...Object.values(updates), id).run();
+  if (!result.meta.changes) throw new HttpError('章节不存在', 404);
+  await db.prepare('UPDATE study_plans SET updated_at=? WHERE id=?').bind(now, item.plan_id).run();
+  return getStudyPlanItem(db, id);
+}
+
+async function deleteStudyPlanItem(db, id) {
+  const row = await db.prepare('SELECT * FROM study_plan_items WHERE id=?').bind(id).first();
+  if (!row) return { ok: false };
+  const now = nowIso();
+  const result = await db.prepare('DELETE FROM study_plan_items WHERE id=?').bind(id).run();
+  await db.prepare('UPDATE study_plans SET updated_at=? WHERE id=?').bind(now, row.plan_id).run();
+  return { ok: result.meta.changes > 0 };
+}
+
+async function reorderStudyPlanItems(db, planId, payload) {
+  const plan = await db.prepare('SELECT * FROM study_plans WHERE id=?').bind(planId).first();
+  if (!plan) throw new HttpError('学习计划不存在', 404);
+  if (!Array.isArray(payload.item_ids)) throw new HttpError('章节排序数据不完整');
+  const itemIds = payload.item_ids.map(toId);
+  const { results = [] } = await db.prepare('SELECT id FROM study_plan_items WHERE plan_id=?').bind(planId).all();
+  const existingIds = results.map((row) => row.id);
+  if (!itemIds.length) {
+    if (existingIds.length) throw new HttpError('章节排序数据不完整');
+    return normalizeStudyPlan(plan, []);
+  }
+  const existingSet = new Set(existingIds);
+  const itemSet = new Set(itemIds);
+  if (itemSet.size !== itemIds.length || itemIds.length !== existingIds.length || itemIds.some((id) => !existingSet.has(id))) {
+    throw new HttpError('章节排序数据不完整');
+  }
+  const now = nowIso();
+  for (const [index, itemId] of itemIds.entries()) {
+    await db.prepare('UPDATE study_plan_items SET position=?, updated_at=? WHERE id=?').bind(index + 1, now, itemId).run();
+  }
+  await db.prepare('UPDATE study_plans SET updated_at=? WHERE id=?').bind(now, planId).run();
+  return getStudyPlan(db, planId);
+}
+
 async function handleAuthApi(request, env, url) {
   const path = url.pathname;
   const method = request.method;
@@ -528,6 +680,26 @@ async function handleApi(request, env) {
     }
   }
 
+  if (parts[1] === 'study-plans') {
+    if (method === 'GET' && parts.length === 2) return json(await listStudyPlans(env.DB));
+    if (method === 'POST' && parts.length === 2) return json(await createStudyPlan(env.DB, await readJson(request)), 201);
+    if (parts.length >= 3) {
+      const id = toId(parts[2]);
+      if (method === 'PATCH' && parts.length === 3) return json(await updateStudyPlan(env.DB, id, await readJson(request)));
+      if (method === 'DELETE' && parts.length === 3) return json(await deleteStudyPlan(env.DB, id));
+      if (method === 'POST' && parts.length === 4 && parts[3] === 'items') return json(await createStudyPlanItem(env.DB, id, await readJson(request)), 201);
+      if (method === 'POST' && parts.length === 5 && parts[3] === 'items' && parts[4] === 'reorder') {
+        return json(await reorderStudyPlanItems(env.DB, id, await readJson(request)));
+      }
+    }
+  }
+
+  if (parts[1] === 'study-plan-items' && parts.length === 3) {
+    const id = toId(parts[2]);
+    if (method === 'PATCH') return json(await updateStudyPlanItem(env.DB, id, await readJson(request)));
+    if (method === 'DELETE') return json(await deleteStudyPlanItem(env.DB, id));
+  }
+
   throw new HttpError('Not found', 404);
 }
 
@@ -567,12 +739,18 @@ export default {
 export {
   createCountdown,
   createNote,
+  createStudyPlan,
+  createStudyPlanItem,
   createTodo,
   listCountdowns,
   listNotes,
+  listStudyPlans,
   listTodos,
   monthRange,
+  reorderStudyPlanItems,
   validateCountdownPayload,
   validateNotePayload,
+  validateStudyPlanItemPayload,
+  validateStudyPlanPayload,
   validateTodoPayload
 };

@@ -22,6 +22,7 @@ DEFAULT_DB_PATH = ROOT / "todos.db"
 PRIORITY_WEIGHT = {"urgent": 4, "high": 3, "medium": 2, "low": 1}
 VALID_PRIORITIES = set(PRIORITY_WEIGHT)
 VALID_STATUS = {"pending", "completed"}
+VALID_STUDY_ITEM_STATUS = {"pending", "completed"}
 VALID_COUNTDOWN_TYPES = {"once", "monthly", "anniversary"}
 DATE_FORMAT = "%Y-%m-%d"
 SESSION_COOKIE = "puck_session"
@@ -219,6 +220,29 @@ class TodoStore:
                 conn.execute("ALTER TABLE notes ADD COLUMN type TEXT NOT NULL DEFAULT 'file'")
             if "parent_id" not in note_columns:
                 conn.execute("ALTER TABLE notes ADD COLUMN parent_id INTEGER")
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS study_plans (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    title TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                )
+            """)
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS study_plan_items (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    plan_id INTEGER NOT NULL,
+                    title TEXT NOT NULL,
+                    status TEXT NOT NULL DEFAULT 'pending',
+                    position INTEGER NOT NULL,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    completed_at TEXT,
+                    FOREIGN KEY (plan_id) REFERENCES study_plans(id) ON DELETE CASCADE
+                )
+            """)
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_study_plan_items_plan_position ON study_plan_items(plan_id, position)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_study_plan_items_plan_status ON study_plan_items(plan_id, status)")
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS countdowns (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -457,6 +481,167 @@ class TodoStore:
             cur = conn.execute("DELETE FROM countdowns WHERE id=?", (countdown_id,))
             conn.commit()
         return {"ok": cur.rowcount > 0}
+
+    def normalize_study_plan(self, row: sqlite3.Row, items: list[dict[str, Any]] | None = None) -> dict[str, Any]:
+        items = items or []
+        plan = dict(row)
+        total_items = len(items)
+        completed_items = sum(1 for item in items if item["status"] == "completed")
+        plan["items"] = items
+        plan["total_items"] = total_items
+        plan["completed_items"] = completed_items
+        plan["progress_percent"] = round(completed_items * 100 / total_items) if total_items else 0
+        return plan
+
+    def get_study_plan(self, plan_id: int) -> dict[str, Any]:
+        with self.connect() as conn:
+            plan = conn.execute("SELECT * FROM study_plans WHERE id=?", (plan_id,)).fetchone()
+            if plan is None:
+                raise KeyError("学习计划不存在")
+            item_rows = conn.execute(
+                "SELECT * FROM study_plan_items WHERE plan_id=? ORDER BY position ASC, created_at ASC",
+                (plan_id,),
+            ).fetchall()
+        return self.normalize_study_plan(plan, [dict(row) for row in item_rows])
+
+    def list_study_plans(self) -> dict[str, Any]:
+        with self.connect() as conn:
+            rows = conn.execute("SELECT * FROM study_plans ORDER BY created_at DESC, id DESC").fetchall()
+            plans = []
+            for row in rows:
+                item_rows = conn.execute(
+                    "SELECT * FROM study_plan_items WHERE plan_id=? ORDER BY position ASC, created_at ASC",
+                    (row["id"],),
+                ).fetchall()
+                plans.append(self.normalize_study_plan(row, [dict(item) for item in item_rows]))
+        return {"plans": plans}
+
+    def create_study_plan(self, title: str) -> dict[str, Any]:
+        title = (title or "").strip()
+        if not title:
+            raise ValueError("学习计划名称不能为空")
+        now = now_local().isoformat()
+        with self.connect() as conn:
+            cur = conn.execute(
+                "INSERT INTO study_plans (title, created_at, updated_at) VALUES (?, ?, ?)",
+                (title, now, now),
+            )
+            conn.commit()
+            return self.get_study_plan(cur.lastrowid)
+
+    def update_study_plan(self, plan_id: int, payload: dict[str, Any]) -> dict[str, Any]:
+        updates = {k: v for k, v in payload.items() if k == "title"}
+        if "title" in updates:
+            updates["title"] = str(updates["title"]).strip()
+            if not updates["title"]:
+                raise ValueError("学习计划名称不能为空")
+        if not updates:
+            return self.get_study_plan(plan_id)
+        updates["updated_at"] = now_local().isoformat()
+        assignments = ", ".join(f"{k}=?" for k in updates)
+        with self.connect() as conn:
+            cur = conn.execute(f"UPDATE study_plans SET {assignments} WHERE id=?", (*updates.values(), plan_id))
+            conn.commit()
+            if cur.rowcount == 0:
+                raise KeyError("学习计划不存在")
+        return self.get_study_plan(plan_id)
+
+    def delete_study_plan(self, plan_id: int) -> dict[str, bool]:
+        with self.connect() as conn:
+            conn.execute("DELETE FROM study_plan_items WHERE plan_id=?", (plan_id,))
+            cur = conn.execute("DELETE FROM study_plans WHERE id=?", (plan_id,))
+            conn.commit()
+        return {"ok": cur.rowcount > 0}
+
+    def create_study_plan_item(self, plan_id: int, title: str) -> dict[str, Any]:
+        title = (title or "").strip()
+        if not title:
+            raise ValueError("章节名称不能为空")
+        now = now_local().isoformat()
+        with self.connect() as conn:
+            plan = conn.execute("SELECT id FROM study_plans WHERE id=?", (plan_id,)).fetchone()
+            if plan is None:
+                raise KeyError("学习计划不存在")
+            position = conn.execute(
+                "SELECT COALESCE(MAX(position), 0) + 1 FROM study_plan_items WHERE plan_id=?",
+                (plan_id,),
+            ).fetchone()[0]
+            cur = conn.execute(
+                """
+                INSERT INTO study_plan_items (plan_id, title, status, position, created_at, updated_at)
+                VALUES (?, ?, 'pending', ?, ?, ?)
+                """,
+                (plan_id, title, position, now, now),
+            )
+            conn.execute("UPDATE study_plans SET updated_at=? WHERE id=?", (now, plan_id))
+            conn.commit()
+            return self.get_study_plan_item(cur.lastrowid)
+
+    def get_study_plan_item(self, item_id: int) -> dict[str, Any]:
+        with self.connect() as conn:
+            row = conn.execute("SELECT * FROM study_plan_items WHERE id=?", (item_id,)).fetchone()
+        if row is None:
+            raise KeyError("章节不存在")
+        return dict(row)
+
+    def update_study_plan_item(self, item_id: int, payload: dict[str, Any]) -> dict[str, Any]:
+        allowed = {"title", "status"}
+        updates = {k: v for k, v in payload.items() if k in allowed}
+        if "title" in updates:
+            updates["title"] = str(updates["title"]).strip()
+            if not updates["title"]:
+                raise ValueError("章节名称不能为空")
+        if "status" in updates and updates["status"] not in VALID_STUDY_ITEM_STATUS:
+            raise ValueError("章节状态必须是 pending/completed")
+        if not updates:
+            return self.get_study_plan_item(item_id)
+        now = now_local().isoformat()
+        updates["updated_at"] = now
+        if updates.get("status") == "completed":
+            updates["completed_at"] = now
+        elif updates.get("status") == "pending":
+            updates["completed_at"] = None
+        assignments = ", ".join(f"{k}=?" for k in updates)
+        with self.connect() as conn:
+            item = conn.execute("SELECT * FROM study_plan_items WHERE id=?", (item_id,)).fetchone()
+            if item is None:
+                raise KeyError("章节不存在")
+            conn.execute(f"UPDATE study_plan_items SET {assignments} WHERE id=?", (*updates.values(), item_id))
+            conn.execute("UPDATE study_plans SET updated_at=? WHERE id=?", (now, item["plan_id"]))
+            conn.commit()
+        return self.get_study_plan_item(item_id)
+
+    def delete_study_plan_item(self, item_id: int) -> dict[str, bool]:
+        now = now_local().isoformat()
+        with self.connect() as conn:
+            item = conn.execute("SELECT * FROM study_plan_items WHERE id=?", (item_id,)).fetchone()
+            if item is None:
+                return {"ok": False}
+            cur = conn.execute("DELETE FROM study_plan_items WHERE id=?", (item_id,))
+            conn.execute("UPDATE study_plans SET updated_at=? WHERE id=?", (now, item["plan_id"]))
+            conn.commit()
+        return {"ok": cur.rowcount > 0}
+
+    def reorder_study_plan_items(self, plan_id: int, item_ids: list[int]) -> dict[str, Any]:
+        if not item_ids:
+            return self.get_study_plan(plan_id)
+        now = now_local().isoformat()
+        with self.connect() as conn:
+            plan = conn.execute("SELECT * FROM study_plans WHERE id=?", (plan_id,)).fetchone()
+            if plan is None:
+                raise KeyError("学习计划不存在")
+            rows = conn.execute("SELECT id FROM study_plan_items WHERE plan_id=?", (plan_id,)).fetchall()
+            existing_ids = [row["id"] for row in rows]
+            if set(item_ids) != set(existing_ids) or len(item_ids) != len(existing_ids):
+                raise ValueError("章节顺序不完整")
+            for position, item_id in enumerate(item_ids, start=1):
+                conn.execute(
+                    "UPDATE study_plan_items SET position=?, updated_at=? WHERE id=?",
+                    (position, now, item_id),
+                )
+            conn.execute("UPDATE study_plans SET updated_at=? WHERE id=?", (now, plan_id))
+            conn.commit()
+        return self.get_study_plan(plan_id)
 
 
 def make_handler(db_path: str):

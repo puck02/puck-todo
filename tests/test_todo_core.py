@@ -113,6 +113,52 @@ class TodoCoreTests(unittest.TestCase):
         after_delete = self.store.list_countdowns()
         self.assertEqual(sorted(item["title"] for item in after_delete["countdowns"]), ["发工资", "生日", "第一次接吻"])
 
+    def test_study_plans_can_manage_items_progress_and_reorder(self):
+        plan = self.store.create_study_plan("李林高数辅导讲义")
+        first = self.store.create_study_plan_item(plan["id"], "函数、极限与连续")
+        second = self.store.create_study_plan_item(plan["id"], "导数与微分")
+
+        listed = self.store.list_study_plans()
+        self.assertEqual([item["title"] for item in listed["plans"][0]["items"]], ["函数、极限与连续", "导数与微分"])
+        self.assertEqual(listed["plans"][0]["total_items"], 2)
+        self.assertEqual(listed["plans"][0]["completed_items"], 0)
+        self.assertEqual(listed["plans"][0]["progress_percent"], 0)
+
+        completed = self.store.update_study_plan_item(first["id"], {"status": "completed"})
+        self.assertEqual(completed["status"], "completed")
+        self.assertIsNotNone(completed["completed_at"])
+
+        self.store.reorder_study_plan_items(plan["id"], [second["id"], first["id"]])
+        after_reorder = self.store.list_study_plans()
+        self.assertEqual([item["title"] for item in after_reorder["plans"][0]["items"]], ["导数与微分", "函数、极限与连续"])
+        self.assertEqual(after_reorder["plans"][0]["completed_items"], 1)
+        self.assertEqual(after_reorder["plans"][0]["progress_percent"], 50)
+
+    def test_study_plan_edit_delete_and_item_validation(self):
+        plan = self.store.create_study_plan("  660  ")
+        updated = self.store.update_study_plan(plan["id"], {"title": "880"})
+        self.assertEqual(updated["title"], "880")
+
+        with self.assertRaises(ValueError):
+            self.store.create_study_plan("")
+        with self.assertRaises(ValueError):
+            self.store.create_study_plan_item(plan["id"], "")
+        with self.assertRaises(ValueError):
+            self.store.update_study_plan_item(999, {"status": "done"})
+
+        item = self.store.create_study_plan_item(plan["id"], "基础篇")
+        self.assertEqual(self.store.delete_study_plan_item(item["id"]), {"ok": True})
+        self.store.create_study_plan_item(plan["id"], "强化篇")
+        self.assertEqual(self.store.delete_study_plan(plan["id"]), {"ok": True})
+        self.assertEqual(self.store.list_study_plans()["plans"], [])
+
+    def test_store_creates_study_plan_indexes(self):
+        with self.store.connect() as conn:
+            indexes = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='index'")}
+
+        self.assertIn("idx_study_plan_items_plan_position", indexes)
+        self.assertIn("idx_study_plan_items_plan_status", indexes)
+
 
 if __name__ == "__main__":
     unittest.main()

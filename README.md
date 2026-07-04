@@ -1,6 +1,6 @@
 # Puck Office
 
-轻量个人办公站：Cloudflare Workers + D1 + 原生 HTML/CSS/JS。当前功能包括月度待办、独立笔记、Markdown 实时预览。
+轻量个人办公站：Cloudflare Workers + D1 + 原生 HTML/CSS/JS。当前功能包括月度待办、倒数日、学习计划、独立笔记、Markdown 实时预览。
 
 ## 本地开发
 
@@ -55,6 +55,14 @@ POST   /api/notes
 GET    /api/notes/{id}
 PATCH  /api/notes/{id}
 DELETE /api/notes/{id}
+GET    /api/study-plans
+POST   /api/study-plans
+PATCH  /api/study-plans/{id}
+DELETE /api/study-plans/{id}
+POST   /api/study-plans/{id}/items
+POST   /api/study-plans/{id}/items/reorder
+PATCH  /api/study-plan-items/{id}
+DELETE /api/study-plan-items/{id}
 ```
 
 ## GitHub Actions 自动部署

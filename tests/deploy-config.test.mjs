@@ -3,12 +3,14 @@ import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 
 test('Cloudflare deployment files are wired for Workers, D1, assets, and GitHub Actions', async () => {
-  const [wrangler, workflow, migration, countdownMigration, countdownFrequencyMigration, ciPrepare] = await Promise.all([
+  const [wrangler, workflow, migration, countdownMigration, countdownFrequencyMigration, performanceMigration, studyMigration, ciPrepare] = await Promise.all([
     readFile(new URL('../wrangler.jsonc', import.meta.url), 'utf8'),
     readFile(new URL('../.github/workflows/deploy.yml', import.meta.url), 'utf8'),
     readFile(new URL('../migrations/0001_init.sql', import.meta.url), 'utf8'),
     readFile(new URL('../migrations/0003_countdowns.sql', import.meta.url), 'utf8'),
     readFile(new URL('../migrations/0004_countdown_frequency.sql', import.meta.url), 'utf8'),
+    readFile(new URL('../migrations/0005_performance_indexes.sql', import.meta.url), 'utf8'),
+    readFile(new URL('../migrations/0006_study_plans.sql', import.meta.url), 'utf8'),
     readFile(new URL('../scripts/prepare-ci-wrangler-config.mjs', import.meta.url), 'utf8')
   ]);
 
@@ -48,5 +50,10 @@ test('Cloudflare deployment files are wired for Workers, D1, assets, and GitHub 
   assert.match(countdownMigration, /idx_countdowns_target_date/);
   assert.match(countdownFrequencyMigration, /ALTER TABLE countdowns ADD COLUMN event_type/);
   assert.match(countdownFrequencyMigration, /ALTER TABLE countdowns ADD COLUMN repeat_day/);
+  assert.match(performanceMigration, /idx_todos_status_due_at/);
+  assert.match(studyMigration, /CREATE TABLE IF NOT EXISTS study_plans/);
+  assert.match(studyMigration, /CREATE TABLE IF NOT EXISTS study_plan_items/);
+  assert.match(studyMigration, /idx_study_plan_items_plan_position/);
+  assert.match(studyMigration, /idx_study_plan_items_plan_status/);
   assert.match(ciPrepare, /delete config\.routes/);
 });

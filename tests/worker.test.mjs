@@ -118,7 +118,7 @@ class FakeStatement {
         )
       };
     }
-    if (sql.startsWith('SELECT * FROM study_plan_items WHERE plan_id=')) {
+    if (sql === 'SELECT * FROM study_plan_items WHERE plan_id=? ORDER BY position ASC, created_at ASC') {
       const [planId] = this.params;
       return {
         results: this.db.studyPlanItems
@@ -639,6 +639,22 @@ test('Worker study plan API manages plans items progress and reorder', async () 
   assert.equal(completed.body.status, 'completed');
   assert.ok(completed.body.completed_at);
 
+  const reopened = await authenticatedRequest(db, `/api/study-plan-items/${first.body.id}`, {
+    method: 'PATCH',
+    body: JSON.stringify({ status: 'pending' })
+  });
+  assert.equal(reopened.res.status, 200);
+  assert.equal(reopened.body.status, 'pending');
+  assert.equal(reopened.body.completed_at, null);
+
+  const completedAgain = await authenticatedRequest(db, `/api/study-plan-items/${first.body.id}`, {
+    method: 'PATCH',
+    body: JSON.stringify({ status: 'completed' })
+  });
+  assert.equal(completedAgain.res.status, 200);
+  assert.equal(completedAgain.body.status, 'completed');
+  assert.ok(completedAgain.body.completed_at);
+
   const reordered = await authenticatedRequest(db, `/api/study-plans/${created.body.id}/items/reorder`, {
     method: 'POST',
     body: JSON.stringify({ item_ids: [second.body.id, first.body.id] })
@@ -659,6 +675,15 @@ test('Worker study plan API manages plans items progress and reorder', async () 
   });
   assert.equal(renamed.res.status, 200);
   assert.equal(renamed.body.title, '880高数');
+
+  for (const payload of [{}, { foo: 'bar' }, { title: '   ' }]) {
+    const invalidRename = await authenticatedRequest(db, `/api/study-plans/${created.body.id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(payload)
+    });
+    assert.equal(invalidRename.res.status, 400);
+    assert.equal(invalidRename.body.error, '学习计划名称不能为空');
+  }
 
   const itemDeleted = await authenticatedRequest(db, `/api/study-plan-items/${second.body.id}`, { method: 'DELETE' });
   assert.equal(itemDeleted.res.status, 200);
@@ -703,6 +728,14 @@ test('Worker study plan API manages plans items progress and reorder', async () 
     const invalid = await authenticatedRequest(validationDb, `/api/study-plans/${plan.body.id}/items/reorder`, {
       method: 'POST',
       body: JSON.stringify({ item_ids })
+    });
+    assert.equal(invalid.res.status, 400);
+    assert.equal(invalid.body.error, '章节排序数据不完整');
+  }
+  for (const payload of [{}, { item_ids: null }]) {
+    const invalid = await authenticatedRequest(validationDb, `/api/study-plans/${plan.body.id}/items/reorder`, {
+      method: 'POST',
+      body: JSON.stringify(payload)
     });
     assert.equal(invalid.res.status, 400);
     assert.equal(invalid.body.error, '章节排序数据不完整');

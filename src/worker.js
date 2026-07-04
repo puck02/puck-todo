@@ -514,12 +514,8 @@ async function createStudyPlan(db, payload) {
 }
 
 async function updateStudyPlan(db, id, payload) {
-  const updates = {};
-  if ('title' in payload) updates.title = validateStudyPlanPayload(payload).title;
-  if (!Object.keys(updates).length) return getStudyPlan(db, id);
-  updates.updated_at = nowIso();
-  const assignments = Object.keys(updates).map((key) => `${key}=?`).join(', ');
-  const result = await db.prepare(`UPDATE study_plans SET ${assignments} WHERE id=?`).bind(...Object.values(updates), id).run();
+  const data = validateStudyPlanPayload(payload);
+  const result = await db.prepare('UPDATE study_plans SET title=?, updated_at=? WHERE id=?').bind(data.title, nowIso(), id).run();
   if (!result.meta.changes) throw new HttpError('学习计划不存在', 404);
   return getStudyPlan(db, id);
 }

@@ -1619,7 +1619,7 @@ textarea:disabled {
 
 @media (max-width: 560px) {
   body {
-    padding-top: 106px;
+    padding-top: 174px;
   }
 
   .shell,
@@ -1643,12 +1643,12 @@ textarea:disabled {
   .main-nav {
     width: 100%;
     display: grid;
-    grid-template-columns: repeat(4, 1fr);
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .main-nav a {
     min-width: 0;
-    padding: 7px 11px;
+    padding: 7px 8px;
   }
 
   .logout-btn {

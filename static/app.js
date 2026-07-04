@@ -866,7 +866,7 @@ function studyProgress(plan) {
 }
 
 function initStudyPage() {
-  const state = { plans: [], busy: false, draggedItemId: null, draggedPlanId: null };
+  const state = { plans: [], busy: false, draggedItemId: null, draggedPlanId: null, editingItemId: null };
   const studyPlanForm = $('studyPlanForm');
   const studyPlanTitleInput = $('studyPlanTitleInput');
   const studyPlansMeta = $('studyPlansMeta');
@@ -879,6 +879,15 @@ function initStudyPage() {
     for (const el of document.querySelectorAll('body[data-page="study"] button, body[data-page="study"] input')) {
       el.disabled = state.busy || el.dataset.orderBoundary === 'true';
     }
+  }
+
+  function focusEditingItem() {
+    if (!state.editingItemId || state.busy) return;
+    const row = [...studyPlansList.querySelectorAll('.study-item-card')]
+      .find((item) => String(item.dataset.itemId) === String(state.editingItemId));
+    const input = row?.querySelector('.study-item-edit-input');
+    input?.focus();
+    input?.select();
   }
 
   function findPlan(planId) {
@@ -969,22 +978,19 @@ function initStudyPage() {
         empty.textContent = '暂无章节。';
         items.appendChild(empty);
       } else {
-        plan.items.forEach((item, index) => {
+        plan.items.forEach((item) => {
           const safeTitle = escapeHtml(item.title);
+          const isEditing = String(state.editingItemId) === String(item.id);
           const row = document.createElement('div');
-          row.className = `study-item-row ${item.status === 'completed' ? 'completed' : ''}`;
-          row.draggable = true;
+          row.className = `study-item-card ${item.status === 'completed' ? 'completed' : ''} ${isEditing ? 'editing' : ''}`;
+          row.draggable = !isEditing;
           row.dataset.itemId = String(item.id);
           row.innerHTML = `
             <button class="drag-handle" type="button" title="拖拽排序" aria-label="拖拽排序">⋮⋮</button>
             <button class="check ${item.status === 'completed' ? 'done' : ''}" type="button" data-study-action="toggle-item" aria-label="切换完成：${safeTitle}"></button>
-            <p class="study-item-title">${safeTitle}</p>
-            <div class="study-item-actions">
-              <button class="icon-btn" type="button" data-study-action="move-up" ${index === 0 ? 'disabled data-order-boundary="true"' : ''}>上移</button>
-              <button class="icon-btn" type="button" data-study-action="move-down" ${index === plan.items.length - 1 ? 'disabled data-order-boundary="true"' : ''}>下移</button>
-              <button class="icon-btn" type="button" data-study-action="edit-item">编辑</button>
-              <button class="icon-btn danger" type="button" data-study-action="delete-item">删除</button>
-            </div>
+            ${isEditing
+              ? `<input class="study-item-edit-input" type="text" maxlength="120" value="${safeTitle}" aria-label="编辑章节：${safeTitle}" />`
+              : `<p class="study-item-title">${safeTitle}</p>`}
           `;
           items.appendChild(row);
         });
@@ -995,6 +1001,7 @@ function initStudyPage() {
     }
     studyPlansList.replaceChildren(fragment);
     setStudyBusy(state.busy);
+    focusEditingItem();
   }
 
   async function loadStudyPlans() {
@@ -1026,6 +1033,46 @@ function initStudyPage() {
       toast(err.message);
     } finally {
       setStudyBusy(false);
+    }
+  }
+
+  function cancelInlineStudyEdit() {
+    state.editingItemId = null;
+    renderStudyPlans();
+  }
+
+  async function saveInlineStudyItem(input) {
+    if (state.busy) return;
+    const row = input.closest('.study-item-card');
+    const { item } = findItem(row?.dataset.itemId);
+    if (!row || !item) return;
+    if (String(state.editingItemId) !== String(row.dataset.itemId)) return;
+    const title = input.value.trim();
+    if (!title) {
+      toast('章节名称不能为空');
+      input.focus();
+      return;
+    }
+    if (title === item.title) {
+      cancelInlineStudyEdit();
+      return;
+    }
+
+    setStudyBusy(true);
+    try {
+      const saved = await request(`/api/study-plan-items/${item.id}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ title })
+      });
+      Object.assign(item, saved);
+      state.editingItemId = null;
+      toast('已保存');
+    } catch (err) {
+      state.editingItemId = null;
+      toast(err.message);
+    } finally {
+      setStudyBusy(false);
+      renderStudyPlans();
     }
   }
 
@@ -1123,39 +1170,6 @@ function initStudyPage() {
         }
       }
 
-      if (row && action === 'edit-item') {
-        const { item } = findItem(row.dataset.itemId);
-        if (!plan || !item) return;
-        const title = prompt('章节名称', item.title);
-        if (title === null) return;
-        setStudyBusy(true);
-        const saved = await request(`/api/study-plan-items/${item.id}`, { method: 'PATCH', body: JSON.stringify({ title }) });
-        Object.assign(item, saved);
-        renderStudyPlans();
-        toast('已保存');
-      }
-
-      if (row && action === 'delete-item') {
-        const { item } = findItem(row.dataset.itemId);
-        if (!plan || !item) return;
-        if (!confirm(`删除章节「${item.title}」？`)) return;
-        setStudyBusy(true);
-        await request(`/api/study-plan-items/${item.id}`, { method: 'DELETE' });
-        plan.items = plan.items.filter((entry) => String(entry.id) !== String(item.id));
-        updatePlanProgress(plan);
-        renderStudyPlans();
-        toast('已删除');
-      }
-
-      if (row && (action === 'move-up' || action === 'move-down')) {
-        if (!plan) return;
-        const index = plan.items.findIndex((item) => String(item.id) === row.dataset.itemId);
-        const targetIndex = action === 'move-up' ? index - 1 : index + 1;
-        if (index < 0 || targetIndex < 0 || targetIndex >= plan.items.length) return;
-        const next = [...plan.items];
-        [next[index], next[targetIndex]] = [next[targetIndex], next[index]];
-        await reorderStudyItems(plan, next.map((item) => item.id));
-      }
     } catch (err) {
       toast(err.message);
     } finally {
@@ -1163,8 +1177,59 @@ function initStudyPage() {
     }
   });
 
+  studyPlansList.addEventListener('dblclick', (event) => {
+    if (state.busy || event.target.closest('button')) return;
+    const row = event.target.closest('.study-item-card');
+    if (!row) return;
+    state.editingItemId = row.dataset.itemId;
+    renderStudyPlans();
+  });
+
+  studyPlansList.addEventListener('keydown', (event) => {
+    const input = event.target.closest('.study-item-edit-input');
+    if (!input) return;
+    if (event.key === 'Enter') {
+      event.preventDefault();
+      saveInlineStudyItem(input).catch(err => toast(err.message));
+    }
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      cancelInlineStudyEdit();
+    }
+  });
+
+  studyPlansList.addEventListener('focusout', (event) => {
+    const input = event.target.closest('.study-item-edit-input');
+    if (!input || state.busy) return;
+    saveInlineStudyItem(input).catch(err => toast(err.message));
+  });
+
+  studyPlansList.addEventListener('contextmenu', async (event) => {
+    if (state.busy || event.target.closest('.study-item-edit-input')) return;
+    const row = event.target.closest('.study-item-card');
+    const card = row?.closest('[data-plan-id]');
+    const plan = card ? findPlan(card.dataset.planId) : null;
+    const { item } = findItem(row?.dataset.itemId);
+    if (!row || !plan || !item) return;
+    event.preventDefault();
+    if (!confirm(`删除章节「${item.title}」？`)) return;
+    setStudyBusy(true);
+    try {
+      await request(`/api/study-plan-items/${item.id}`, { method: 'DELETE' });
+      plan.items = plan.items.filter((entry) => String(entry.id) !== String(item.id));
+      if (String(state.editingItemId) === String(item.id)) state.editingItemId = null;
+      updatePlanProgress(plan);
+      renderStudyPlans();
+      toast('已删除');
+    } catch (err) {
+      toast(err.message);
+    } finally {
+      setStudyBusy(false);
+    }
+  });
+
   studyPlansList.addEventListener('dragstart', (event) => {
-    const row = event.target.closest('.study-item-row');
+    const row = event.target.closest('.study-item-card');
     const card = row?.closest('[data-plan-id]');
     if (!row || !card || state.busy) return;
     state.draggedItemId = row.dataset.itemId;
@@ -1174,20 +1239,20 @@ function initStudyPage() {
   });
 
   studyPlansList.addEventListener('dragend', (event) => {
-    event.target.closest('.study-item-row')?.classList.remove('dragging');
+    event.target.closest('.study-item-card')?.classList.remove('dragging');
     state.draggedItemId = null;
     state.draggedPlanId = null;
   });
 
   studyPlansList.addEventListener('dragover', (event) => {
     if (!state.draggedItemId || state.busy) return;
-    const row = event.target.closest('.study-item-row');
+    const row = event.target.closest('.study-item-card');
     const card = row?.closest('[data-plan-id]');
     if (row && card?.dataset.planId === state.draggedPlanId) event.preventDefault();
   });
 
   studyPlansList.addEventListener('drop', async (event) => {
-    const targetRow = event.target.closest('.study-item-row');
+    const targetRow = event.target.closest('.study-item-card');
     const card = targetRow?.closest('[data-plan-id]');
     if (!targetRow || !card || !state.draggedItemId || state.busy) return;
     if (card.dataset.planId !== state.draggedPlanId || targetRow.dataset.itemId === state.draggedItemId) return;

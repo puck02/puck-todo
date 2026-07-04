@@ -57,6 +57,7 @@ class FakeEvent {
     this.type = type;
     this.bubbles = options.bubbles ?? true;
     this.dataTransfer = options.dataTransfer || null;
+    this.key = options.key || '';
     this.defaultPrevented = false;
     this.target = options.target || null;
     this.currentTarget = null;
@@ -194,6 +195,8 @@ class FakeElement {
 
   focus() {}
 
+  select() {}
+
   contains(node) {
     for (let current = node; current; current = current.parentNode) {
       if (current === this) return true;
@@ -309,17 +312,18 @@ function parseStudyHtml(parent, html) {
   }
 
   if (html.includes('drag-handle')) {
-    const firstButtons = parseButtons(parent, html.split('<div class="study-item-actions">')[0]);
-    parent.append(...firstButtons);
+    parent.append(...parseButtons(parent, html));
+    const inputMatch = html.match(/<input\s+([^>]*)\/?>/);
+    if (inputMatch) {
+      parent.appendChild(createElementFromTag(parent, 'input', parseAttributes(inputMatch[1])));
+      return;
+    }
     const titleMatch = html.match(/<p class="study-item-title">([\s\S]*?)<\/p>/);
     if (titleMatch) {
       const title = createElementFromTag(parent, 'p', { class: 'study-item-title' }, titleMatch[1]);
       if (titleMatch[1].includes('<img')) title.appendChild(createElementFromTag(parent, 'img'));
       parent.appendChild(title);
     }
-    const actions = createElementFromTag(parent, 'div', { class: 'study-item-actions' });
-    actions.append(...parseButtons(parent, html.match(/<div class="study-item-actions">([\s\S]*?)<\/div>/)?.[1] || ''));
-    parent.appendChild(actions);
   }
 }
 
@@ -412,7 +416,6 @@ test('office UI keeps todos and notes on separate pages', async () => {
   assert.match(app, /folder-card/);
   assert.match(app, /file-icon/);
   assert.doesNotMatch(app, /file-preview/);
-  assert.doesNotMatch(app, /dblclick/);
   assert.match(app, /addEventListener\('click', openItem\)/);
   assert.match(app, /stopPropagation\(\)/);
   assert.doesNotMatch(app, /toggleNotesDrawer/);
@@ -514,7 +517,8 @@ test('office UI includes a study plans page', async () => {
 
   assert.match(style, /\.study-plan-card/);
   assert.match(style, /\.study-progress-bar/);
-  assert.match(style, /\.study-item-row/);
+  assert.match(style, /\.study-item-card/);
+  assert.match(style, /\.study-item-edit-input/);
   assert.match(style, /\.drag-handle/);
 });
 
@@ -527,17 +531,22 @@ test('study plans page wires API progress and reorder interactions', async () =>
   assert.match(app, /\/api\/study-plan-items/);
   assert.match(app, /function\s+studyProgress/);
   assert.match(app, /study-progress-bar/);
-  assert.match(app, /study-item-row/);
+  assert.match(app, /study-item-card/);
   assert.match(app, /dragstart/);
   assert.match(app, /drop/);
+  assert.match(app, /dblclick/);
+  assert.match(app, /contextmenu/);
   assert.match(app, /reorderStudyItems/);
-  assert.match(app, /data-study-action="move-up"/);
-  assert.match(app, /data-study-action="move-down"/);
+  assert.doesNotMatch(app, /data-study-action="move-up"/);
+  assert.doesNotMatch(app, /data-study-action="move-down"/);
+  assert.doesNotMatch(app, /data-study-action="edit-item"/);
+  assert.doesNotMatch(app, /data-study-action="delete-item"/);
 });
 
 test('study plans interactions render safely update progress and guard reorder', async () => {
   const document = createStudyDocument();
   const reorderBodies = [];
+  const itemPatchBodies = [];
   let failNextItemPatch = false;
   let nextItemId = 103;
   const plans = [
@@ -618,6 +627,7 @@ test('study plans interactions render safely update progress and guard reorder',
 
       const itemMatch = String(path).match(/^\/api\/study-plan-items\/(\d+)$/);
       if (itemMatch && method === 'PATCH') {
+        itemPatchBodies.push(body);
         if (failNextItemPatch) {
           failNextItemPatch = false;
           return jsonResponse({ error: '保存失败' }, 500);
@@ -652,7 +662,7 @@ test('study plans interactions render safely update progress and guard reorder',
     for (let i = 0; i < 4; i += 1) await flush();
   };
   const planCard = (id = 1) => document.querySelector(`[data-plan-id="${id}"]`);
-  const planRows = (id = 1) => planCard(id).querySelectorAll('.study-item-row');
+  const planRows = (id = 1) => planCard(id).querySelectorAll('.study-item-card');
   const progressText = () => planCard(1).querySelector('.study-progress-text').textContent;
   const actionButton = (row, action) => row.querySelector(`[data-study-action="${action}"]`);
 
@@ -664,15 +674,35 @@ test('study plans interactions render safely update progress and guard reorder',
   actionButton(planRows()[0], 'toggle-item').click();
   await settle();
   assert.equal(progressText(), '1/2 · 50%');
-  assert.equal(planCard(1).querySelectorAll('.study-item-row.completed').length, 1);
+  assert.equal(planCard(1).querySelectorAll('.study-item-card.completed').length, 1);
   assert.equal(document.getElementById('studyPlanTitleInput').disabled, false);
 
   failNextItemPatch = true;
   actionButton(planRows()[0], 'toggle-item').click();
   await settle();
   assert.equal(progressText(), '1/2 · 50%');
-  assert.equal(planCard(1).querySelectorAll('.study-item-row.completed').length, 1);
+  assert.equal(planCard(1).querySelectorAll('.study-item-card.completed').length, 1);
   assert.equal(document.getElementById('studyPlanTitleInput').disabled, false);
+
+  planRows()[0].dispatchEvent(new FakeEvent('dblclick'));
+  const editInput = planRows()[0].querySelector('.study-item-edit-input');
+  assert.ok(editInput);
+  editInput.value = '第一章新标题';
+  editInput.dispatchEvent(new FakeEvent('keydown', { key: 'Enter' }));
+  await settle();
+  assert.deepEqual(itemPatchBodies.at(-1), { title: '第一章新标题' });
+  assert.match(planRows()[0].textContent, /第一章新标题/);
+
+  const patchCountAfterSave = itemPatchBodies.length;
+  planRows()[0].dispatchEvent(new FakeEvent('dblclick'));
+  const cancelInput = planRows()[0].querySelector('.study-item-edit-input');
+  cancelInput.value = '不应保存';
+  cancelInput.dispatchEvent(new FakeEvent('keydown', { key: 'Escape' }));
+  cancelInput.dispatchEvent(new FakeEvent('focusout'));
+  await settle();
+  assert.equal(itemPatchBodies.length, patchCountAfterSave);
+  assert.match(planRows()[0].textContent, /第一章新标题/);
+  assert.equal(planRows()[0].querySelector('.study-item-edit-input'), null);
 
   const addItemForm = planCard(1).querySelector('form[data-study-action="add-item"]');
   addItemForm.elements.title.value = '第三章';
@@ -682,12 +712,18 @@ test('study plans interactions render safely update progress and guard reorder',
   assert.ok(planRows().some((row) => row.textContent.includes('第三章')));
 
   const addedRow = planRows().find((row) => row.textContent.includes('第三章'));
-  actionButton(addedRow, 'delete-item').click();
+  const deleteEvent = new FakeEvent('contextmenu');
+  addedRow.dispatchEvent(deleteEvent);
   await settle();
+  assert.equal(deleteEvent.defaultPrevented, true);
   assert.equal(progressText(), '1/2 · 50%');
   assert.equal(planRows().some((row) => row.textContent.includes('第三章')), false);
 
-  actionButton(planRows()[1], 'move-up').click();
+  const draggedWithinPlan = planRows()[1];
+  const dropTarget = planRows()[0];
+  draggedWithinPlan.dispatchEvent(new FakeEvent('dragstart', { dataTransfer: { effectAllowed: '' } }));
+  dropTarget.dispatchEvent(new FakeEvent('drop'));
+  draggedWithinPlan.dispatchEvent(new FakeEvent('dragend'));
   await settle();
   assert.deepEqual(reorderBodies.at(-1), { item_ids: [102, 101] });
   assert.match(planRows()[0].textContent, /第二章/);

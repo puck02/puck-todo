@@ -1,4 +1,5 @@
 import os
+import sqlite3
 import tempfile
 import unittest
 from datetime import datetime, timedelta
@@ -147,10 +148,60 @@ class TodoCoreTests(unittest.TestCase):
             self.store.update_study_plan_item(999, {"status": "done"})
 
         item = self.store.create_study_plan_item(plan["id"], "基础篇")
+        completed = self.store.update_study_plan_item(item["id"], {"status": "completed"})
+        self.assertIsNotNone(completed["completed_at"])
+        reopened = self.store.update_study_plan_item(item["id"], {"status": "pending"})
+        self.assertIsNone(reopened["completed_at"])
+        renamed = self.store.update_study_plan_item(item["id"], {"title": "基础篇（新版）"})
+        self.assertEqual(renamed["title"], "基础篇（新版）")
         self.assertEqual(self.store.delete_study_plan_item(item["id"]), {"ok": True})
         self.store.create_study_plan_item(plan["id"], "强化篇")
         self.assertEqual(self.store.delete_study_plan(plan["id"]), {"ok": True})
         self.assertEqual(self.store.list_study_plans()["plans"], [])
+
+    def test_study_plan_reorder_rejects_invalid_item_sets(self):
+        plan = self.store.create_study_plan("880")
+        first = self.store.create_study_plan_item(plan["id"], "基础篇")
+        second = self.store.create_study_plan_item(plan["id"], "强化篇")
+        other_plan = self.store.create_study_plan("660")
+        other_item = self.store.create_study_plan_item(other_plan["id"], "选择题")
+
+        with self.assertRaises(ValueError):
+            self.store.reorder_study_plan_items(plan["id"], [first["id"]])
+        with self.assertRaises(ValueError):
+            self.store.reorder_study_plan_items(plan["id"], [first["id"], first["id"]])
+        with self.assertRaises(ValueError):
+            self.store.reorder_study_plan_items(plan["id"], [first["id"], other_item["id"]])
+
+        listed = self.store.get_study_plan(plan["id"])
+        self.assertEqual([item["id"] for item in listed["items"]], [first["id"], second["id"]])
+
+    def test_list_study_plans_loads_items_with_single_query(self):
+        first_plan = self.store.create_study_plan("660")
+        self.store.create_study_plan_item(first_plan["id"], "基础篇")
+        second_plan = self.store.create_study_plan("880")
+        self.store.create_study_plan_item(second_plan["id"], "强化篇")
+        select_statements = []
+
+        class CountingConnection(sqlite3.Connection):
+            def execute(self, sql, parameters=(), /):
+                statement = " ".join(sql.split())
+                if statement.upper().startswith("SELECT"):
+                    select_statements.append(statement)
+                return super().execute(sql, parameters)
+
+        def connect():
+            conn = sqlite3.connect(self.db_path, factory=CountingConnection)
+            conn.row_factory = sqlite3.Row
+            return conn
+
+        self.store.connect = connect
+
+        listed = self.store.list_study_plans()
+        item_queries = [statement for statement in select_statements if "FROM study_plan_items" in statement]
+
+        self.assertEqual([plan["title"] for plan in listed["plans"]], ["880", "660"])
+        self.assertEqual(len(item_queries), 1)
 
     def test_store_creates_study_plan_indexes(self):
         with self.store.connect() as conn:

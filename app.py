@@ -507,13 +507,14 @@ class TodoStore:
     def list_study_plans(self) -> dict[str, Any]:
         with self.connect() as conn:
             rows = conn.execute("SELECT * FROM study_plans ORDER BY created_at DESC, id DESC").fetchall()
-            plans = []
-            for row in rows:
-                item_rows = conn.execute(
-                    "SELECT * FROM study_plan_items WHERE plan_id=? ORDER BY position ASC, created_at ASC",
-                    (row["id"],),
-                ).fetchall()
-                plans.append(self.normalize_study_plan(row, [dict(item) for item in item_rows]))
+            item_rows = conn.execute(
+                "SELECT * FROM study_plan_items ORDER BY plan_id ASC, position ASC, created_at ASC"
+            ).fetchall()
+        items_by_plan = {row["id"]: [] for row in rows}
+        for item in item_rows:
+            if item["plan_id"] in items_by_plan:
+                items_by_plan[item["plan_id"]].append(dict(item))
+        plans = [self.normalize_study_plan(row, items_by_plan[row["id"]]) for row in rows]
         return {"plans": plans}
 
     def create_study_plan(self, title: str) -> dict[str, Any]:
